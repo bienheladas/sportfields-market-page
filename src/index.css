@@ -1,0 +1,42 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --paper: #f8f4ec;
+  --paper-2: #f1ecdf;
+  --paper-3: #e8e1cf;
+  --ink: #1a1a17;
+  --ink-2: #3a3935;
+  --muted: #76726a;
+  --line: #e0d8c4;
+  --line-strong: #c9bfa4;
+  --accent: #ff6a4d;
+  --accent-soft: #ffe1d8;
+  --accent-deep: #d44a2f;
+  --mint: #b8e3c8;
+  --mint-deep: #6fbe8a;
+  --mint-bg: #d8ecde;
+  --amber: #f4c97c;
+  --amber-bg: #fbf0d4;
+  --amber-deep: #c89236;
+  --rose: #f0a8a0;
+  --rose-bg: #fbe1dd;
+  --slate: #a8b8c9;
+  --slate-bg: #dde6ee;
+  --amber-ink: #6b4d10;
+  --rose-ink: #6f2920;
+}
+
+html, body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Inter', system-ui, sans-serif;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+* { box-sizing: border-box; }

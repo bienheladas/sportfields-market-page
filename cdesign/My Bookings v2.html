@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Mis reservas — Pitch</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --paper:#f8f4ec;--paper-2:#f1ecdf;--paper-3:#e8e1cf;
+    --ink:#1a1a17;--ink-2:#3a3935;--muted:#76726a;
+    --line:#e0d8c4;--line-strong:#c9bfa4;
+    --accent:#ff6a4d;--accent-soft:#ffe1d8;--accent-deep:#d44a2f;
+    --mint:#b8e3c8;--mint-deep:#6fbe8a;--mint-bg:#d8ecde;--mint-ink:#244d33;
+    --amber:#f4c97c;--amber-bg:#fbf0d4;--amber-deep:#c89236;--amber-ink:#6a4c14;
+    --rose:#f0a8a0;--rose-bg:#fbe1dd;--rose-ink:#6f2920;
+    --slate:#a8b8c9;--slate-bg:#dde6ee;--slate-ink:#2c4055;
+    --shadow:0 1px 2px rgba(20,16,8,.04),0 4px 14px rgba(20,16,8,.05);
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:'Inter',system-ui,sans-serif;background:var(--paper);color:var(--ink);-webkit-font-smoothing:antialiased}
+  .mono{font-family:'JetBrains Mono',monospace}
+  button{font-family:inherit;cursor:pointer}
+  a{color:inherit}
+
+  /* ── nav ───────────────────────────────────────── */
+  .nav{display:flex;align-items:center;gap:24px;padding:16px 36px;border-bottom:1px solid var(--line);background:var(--paper);position:sticky;top:0;z-index:10}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px}
+  .brand-mark{width:28px;height:28px;background:radial-gradient(circle at 35% 35%,#ff8a72 0%,var(--accent) 60%,#d44a2f 100%);border-radius:50%}
+  .nav-links{display:flex;gap:4px;margin-left:16px}
+  .nav-link{padding:7px 12px;font-size:14px;color:var(--ink-2);text-decoration:none;border-radius:8px;font-weight:500}
+  .nav-link.active{background:var(--paper-2);color:var(--ink)}
+  .spacer{flex:1}
+  .net-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:6px;background:var(--paper-2);font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.04em}
+  .net-chip .nd{width:6px;height:6px;border-radius:50%;background:var(--amber-deep)}
+  .wallet{display:flex;align-items:center;gap:8px;padding:7px 14px;border:1px solid var(--line-strong);border-radius:999px;font-size:13px;font-weight:500;background:transparent}
+  .wallet .dot{width:8px;height:8px;border-radius:50%;background:var(--mint-deep);box-shadow:0 0 0 3px rgba(111,190,138,.18)}
+  .wallet .addr{font-family:'JetBrains Mono',monospace;color:var(--ink-2)}
+  .wallet .bal{color:var(--muted);border-left:1px solid var(--line);padding-left:8px;margin-left:4px}
+
+  /* ── layout ────────────────────────────────────── */
+  .wrap{max-width:1180px;margin:0 auto;padding:32px 36px 80px}
+  .hd{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;gap:24px}
+  .hd h1{margin:0 0 6px;font-size:32px;letter-spacing:-0.02em;font-weight:700}
+  .hd .sub{color:var(--muted);font-size:14px;max-width:560px}
+  .hd-r{display:flex;gap:10px;align-items:center}
+
+  /* on-chain banner */
+  .chain-banner{display:flex;align-items:center;gap:14px;padding:12px 16px;background:var(--paper);border:1px solid var(--line);border-radius:12px;margin-bottom:24px;font-size:12px;color:var(--muted)}
+  .chain-banner b{color:var(--ink-2);font-weight:600}
+  .chain-banner .seg{display:flex;align-items:center;gap:8px}
+  .chain-banner .sep{width:1px;height:14px;background:var(--line)}
+  .chain-banner .src{margin-left:auto;display:flex;gap:6px;align-items:center}
+
+  /* tabs */
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px;align-items:flex-end}
+  .tab{padding:10px 16px;background:transparent;border:0;color:var(--muted);font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;align-items:center;gap:8px}
+  .tab .count{background:var(--paper-2);color:var(--ink-2);font-size:11px;padding:2px 7px;border-radius:999px;font-weight:600;min-width:18px;text-align:center}
+  .tab.on{color:var(--ink);border-bottom-color:var(--accent)}
+  .tab.on .count{background:var(--accent-soft);color:var(--accent-deep)}
+  .tab:hover:not(.on){color:var(--ink-2)}
+  .tabs .reload{margin-left:auto;display:flex;gap:8px;align-items:center;padding-bottom:8px}
+  .reload-state{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+  /* ── card ──────────────────────────────────────── */
+  .blist{display:flex;flex-direction:column;gap:14px}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;transition:border-color .12s ease}
+  .card:hover{border-color:var(--line-strong)}
+  .card.priority{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft),var(--shadow)}
+
+  .card-top{display:grid;grid-template-columns:96px 1fr auto;gap:20px;padding:18px;align-items:flex-start}
+  .thumb{width:96px;height:96px;border-radius:10px;overflow:hidden;background:#3f7a4d;flex-shrink:0;position:relative}
+  .thumb svg{width:100%;height:100%;display:block}
+  .thumb .corner{position:absolute;bottom:6px;left:6px;background:rgba(0,0,0,.5);color:#fff;font-size:10px;padding:2px 5px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-weight:500}
+
+  .body h3{margin:0 0 4px;font-size:17px;font-weight:600;letter-spacing:-.005em}
+  .body .meta{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:13px;flex-wrap:wrap}
+  .body .meta .sep{width:3px;height:3px;border-radius:50%;background:var(--line-strong)}
+  .body .meta strong{color:var(--ink-2);font-weight:500}
+
+  .when-block{margin-top:10px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .when-time{display:flex;flex-direction:column;line-height:1.2}
+  .when-time .d{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;margin-bottom:3px}
+  .when-time .t{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink)}
+  .when-time .dur{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-top:2px}
+  .when-arrow{color:var(--line-strong)}
+
+  .right{display:flex;flex-direction:column;align-items:flex-end;gap:8px;text-align:right;min-width:170px}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;line-height:1;white-space:nowrap}
+  .pill .pdot{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .pill.confirmed{background:var(--mint-bg);color:var(--mint-ink)}
+  .pill.completed{background:var(--slate-bg);color:var(--slate-ink)}
+  .pill.refunded{background:var(--paper-2);color:var(--muted)}
+  .pill.disputed{background:var(--rose-bg);color:var(--rose-ink)}
+  .price{font-size:20px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+  .price small{display:block;font-size:11px;color:var(--muted);font-weight:500;margin-top:3px;letter-spacing:0;text-transform:none}
+
+  .nft-tag{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;background:linear-gradient(135deg,var(--accent-soft),#fff3eb);border:1px solid var(--accent);color:var(--accent-deep);border-radius:8px;font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace}
+  .nft-tag .hex{font-size:10px}
+
+  /* card divider + actions */
+  .card-foot{display:flex;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid var(--line);background:linear-gradient(180deg,transparent,rgba(232,225,207,.25))}
+  .foot-info{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+  .foot-info .k{color:var(--muted)}
+  .foot-info .v{color:var(--ink-2);font-family:'JetBrains Mono',monospace;font-weight:500}
+  .foot-info a{color:var(--ink-2);text-decoration:none;display:inline-flex;align-items:center;gap:4px;border-bottom:1px dashed var(--line-strong)}
+  .foot-info a:hover{color:var(--accent-deep);border-bottom-color:var(--accent)}
+  .foot-info .badge{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:6px;background:var(--paper-2);font-weight:600;font-size:11px;color:var(--ink-2)}
+  .foot-info .badge.warn{background:var(--amber-bg);color:var(--amber-ink)}
+  .foot-info .badge.danger{background:var(--rose-bg);color:var(--rose-ink)}
+  .foot-actions{margin-left:auto;display:flex;gap:8px}
+
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 14px;border-radius:9px;font-weight:600;font-size:13px;border:1px solid var(--line-strong);background:var(--paper);color:var(--ink);text-decoration:none;white-space:nowrap;transition:all .12s ease}
+  .btn:hover{border-color:var(--ink-2)}
+  .btn.sm{padding:6px 11px;font-size:12px}
+  .btn[disabled]{opacity:.45;cursor:not-allowed}
+  .btn[disabled]:hover{border-color:var(--line-strong)}
+  .btn-primary{background:var(--accent);color:white;border-color:var(--accent)}
+  .btn-primary:hover{background:var(--accent-deep);border-color:var(--accent-deep)}
+  .btn-ghost{background:transparent;border-color:transparent;color:var(--ink-2)}
+  .btn-ghost:hover{background:var(--paper-2)}
+  .btn-redeem{background:#2f7d4a;color:white;border-color:#2f7d4a}
+  .btn-redeem:hover{background:#266239;border-color:#266239}
+  .btn-cancel{color:var(--accent-deep);background:transparent;border-color:transparent}
+  .btn-cancel:hover{background:var(--rose-bg)}
+  .btn-dispute{color:var(--amber-ink);background:var(--amber-bg);border-color:var(--amber)}
+  .btn-dispute:hover{background:#f6dba0;border-color:var(--amber-deep)}
+
+  /* tooltip */
+  .has-tip{position:relative}
+  .has-tip .tip{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:8px 11px;border-radius:8px;font-size:11px;font-weight:500;white-space:normal;width:220px;line-height:1.4;text-align:center;opacity:0;pointer-events:none;transition:opacity .15s ease;z-index:5}
+  .has-tip .tip::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:var(--ink)}
+  .has-tip:hover .tip{opacity:1}
+
+  /* inline error */
+  .err{margin:0 18px 14px;padding:10px 12px;background:var(--rose-bg);border:1px solid var(--rose);border-radius:8px;color:var(--rose-ink);font-size:12px;display:flex;gap:10px;align-items:flex-start}
+  .err .x{margin-left:auto;background:transparent;border:0;color:var(--rose-ink);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px}
+
+  /* expanded details */
+  details.expand{border-top:1px dashed var(--line-strong)}
+  details.expand summary{padding:10px 18px;list-style:none;cursor:pointer;font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.04em;text-transform:uppercase;display:flex;align-items:center;gap:8px;user-select:none}
+  details.expand summary::-webkit-details-marker{display:none}
+  details.expand summary::before{content:"▸";font-size:10px;transition:transform .15s ease;color:var(--line-strong)}
+  details.expand[open] summary::before{transform:rotate(90deg)}
+  .expand-body{padding:4px 18px 16px;display:grid;grid-template-columns:repeat(2,1fr);gap:6px 24px;font-family:'JetBrains Mono',monospace;font-size:11px}
+  .expand-body .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dotted var(--line)}
+  .expand-body .row .k{color:var(--muted)}
+  .expand-body .row .v{color:var(--ink-2);text-align:right;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* empty / state placeholders */
+  .state-card{text-align:center;padding:56px 24px;background:var(--paper);border:1px dashed var(--line-strong);border-radius:14px;color:var(--muted)}
+  .state-card h2{margin:0 0 6px;color:var(--ink);font-size:18px;font-weight:600}
+  .state-card p{margin:0 0 20px;font-size:14px}
+  .state-card .spinner{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;margin:0 auto 14px;animation:sp 0.8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* state preview rail (design only) */
+  .preview-rail{margin-top:48px;padding-top:32px;border-top:1px solid var(--line)}
+  .preview-rail h2{font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:0 0 16px;font-weight:700}
+  .preview-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .preview-grid .state-card{padding:36px 20px}
+  .preview-grid .state-card p{font-size:13px;margin-bottom:14px}
+
+  /* ── modals ────────────────────────────────────── */
+  .modal-backdrop{position:fixed;inset:0;background:rgba(20,16,8,.5);display:none;align-items:center;justify-content:center;z-index:100;padding:20px;backdrop-filter:blur(4px)}
+  .modal-backdrop.on{display:flex}
+  .modal{background:var(--paper);border-radius:16px;width:100%;max-width:440px;border:1px solid var(--line);box-shadow:0 12px 40px rgba(0,0,0,.25);overflow:hidden}
+  .modal-head{padding:20px 22px 0}
+  .modal-head .icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
+  .modal-head .icon.danger{background:var(--rose-bg);color:var(--rose-ink)}
+  .modal-head .icon.warn{background:var(--amber-bg);color:var(--amber-ink)}
+  .modal-head h3{margin:0 0 6px;font-size:18px;font-weight:700}
+  .modal-head p{margin:0 0 16px;font-size:13px;color:var(--muted);line-height:1.5}
+  .modal-body{padding:0 22px}
+  .modal-body .summary{background:var(--paper-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:12px;display:grid;gap:6px}
+  .modal-body .summary .r{display:flex;justify-content:space-between;gap:14px}
+  .modal-body .summary .r .k{color:var(--muted)}
+  .modal-body .summary .r .v{color:var(--ink-2);font-family:'JetBrains Mono',monospace;text-align:right}
+  .modal-body .warning{margin-top:14px;padding:11px 12px;background:var(--amber-bg);border:1px solid var(--amber);border-radius:8px;font-size:12px;color:var(--amber-ink);display:flex;gap:10px;align-items:flex-start;line-height:1.5}
+  .modal-foot{padding:18px 22px 20px;display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+
+  @media (max-width:720px){
+    .nav{padding:14px 18px;gap:12px}
+    .nav-links{display:none}
+    .wrap{padding:24px 18px 60px}
+    .card-top{grid-template-columns:64px 1fr;gap:14px;padding:14px}
+    .thumb{width:64px;height:64px}
+    .right{align-items:flex-start;text-align:left;grid-column:1 / -1;margin-top:6px;flex-direction:row;flex-wrap:wrap;min-width:0}
+    .card-foot{flex-wrap:wrap;padding:12px 14px}
+    .foot-actions{margin-left:0;width:100%}
+    .preview-grid{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body data-screen-label="01 Mis Reservas">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="g-green" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5d9d6c"/><stop offset="1" stop-color="#2a4a3a"/></linearGradient>
+    <linearGradient id="g-clay"  x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d4954c"/><stop offset="1" stop-color="#7a5028"/></linearGradient>
+    <linearGradient id="g-blue"  x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5778a3"/><stop offset="1" stop-color="#2c4561"/></linearGradient>
+    <linearGradient id="g-night" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3a4d3f"/><stop offset="1" stop-color="#1a2622"/></linearGradient>
+  </defs>
+</svg>
+
+<header class="nav">
+  <div class="brand"><div class="brand-mark"></div><span>Pitch</span></div>
+  <nav class="nav-links">
+    <a class="nav-link" href="Field Discovery.html">Buscar</a>
+    <a class="nav-link active" href="#">Mis reservas</a>
+    <a class="nav-link" href="Owner Onboarding.html">Soy dueño</a>
+    <a class="nav-link" href="#">Cómo funciona</a>
+  </nav>
+  <div class="spacer"></div>
+  <span class="net-chip"><span class="nd"></span>PREVIEW · testnet</span>
+  <button class="wallet">
+    <span class="dot"></span>
+    <span class="addr">addr1q…7e8s</span>
+    <span class="bal">412 ₳</span>
+  </button>
+</header>
+
+<div class="wrap">
+  <div class="hd">
+    <div>
+      <h1>Mis reservas</h1>
+      <div class="sub">Slots que ya confirmaste on-chain. Cancelá antes del deadline, redimí tu Rent NFT en cancha, o abrí una disputa si algo salió mal.</div>
+    </div>
+    <div class="hd-r">
+      <button class="btn" id="reload-btn">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 3.5V7H10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Actualizar
+      </button>
+      <a class="btn btn-primary" href="Field Discovery.html">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M8 3v10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        Nueva reserva
+      </a>
+    </div>
+  </div>
+
+  <!-- on-chain context strip -->
+  <div class="chain-banner">
+    <div class="seg"><b>Wallet</b> <span class="mono">addr1q…7e8s</span></div>
+    <div class="sep"></div>
+    <div class="seg"><b>customerPkh</b> <span class="mono">a4f1c9…3b21d8</span></div>
+    <div class="sep"></div>
+    <div class="seg"><b>Validator</b> <span class="mono">addr_test1…rentv</span></div>
+    <div class="src">
+      <span class="net-chip" style="background:transparent;border:1px solid var(--line)">Blockfrost · Preview</span>
+      <span class="reload-state">Actualizado hace 12s</span>
+    </div>
+  </div>
+
+  <!-- tabs -->
+  <div class="tabs">
+    <button class="tab on" data-filter="all">Todas <span class="count">5</span></button>
+    <button class="tab" data-filter="confirmed">Confirmadas <span class="count">3</span></button>
+    <button class="tab" data-filter="completed">Jugadas <span class="count">1</span></button>
+    <button class="tab" data-filter="disputed">Disputas <span class="count">1</span></button>
+    <button class="tab" data-filter="refunded">Reembolsadas <span class="count">0</span></button>
+    <div class="reload">
+      <span class="reload-state">slotStart ascendente</span>
+    </div>
+  </div>
+
+  <div class="blist" id="blist">
+
+    <!-- ─────────────────────────────────────────
+         1. CONFIRMED — slot ya empezó (REDEEM available)
+            Date.now() >= slotStart, < slotEnd
+         ───────────────────────────────────────── -->
+    <article class="card priority" data-status="confirmed">
+      <div class="card-top">
+        <div class="thumb">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+            <rect width="100" height="100" fill="url(#g-green)"/>
+            <line x1="50" y1="0" x2="50" y2="100" stroke="rgba(255,255,255,.22)" stroke-width="1"/>
+            <circle cx="50" cy="50" r="14" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="1"/>
+            <rect x="2" y="2" width="96" height="96" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+          </svg>
+          <div class="corner">field #001</div>
+        </div>
+        <div class="body">
+          <h3>Cancha del Parque</h3>
+          <div class="meta">
+            <strong>Av. Sarmiento 2700, Palermo</strong>
+            <span class="sep"></span>
+            <span>Buenos Aires</span>
+            <span class="sep"></span>
+            <span class="mono" style="font-size:11px">slot #137</span>
+          </div>
+          <div class="when-block">
+            <div class="when-time">
+              <span class="d">Hoy · jue 26 may</span>
+              <span class="t">19:00 → 20:00</span>
+              <span class="dur">UTC · 60 min</span>
+            </div>
+            <span class="nft-tag">
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><path d="M6 0 1 3v6l5 3 5-3V3z" opacity=".4"/><path d="M6 0 1 3l5 3 5-3z"/></svg>
+              RT_2026W22_S137
+            </span>
+          </div>
+        </div>
+        <div class="right">
+          <span class="pill confirmed"><span class="pdot"></span>Confirmada</span>
+          <div class="price">40.00 ₳ <small>en escrow</small></div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <div class="foot-info">
+          <span class="badge warn">✓ Tu slot empezó — redimí ahora</span>
+          <span><span class="k">tx</span> <a href="https://preview.cardanoscan.io/transaction/9d3a2f7c2e" target="_blank" rel="noopener">9d3a…f7c2 ↗</a></span>
+        </div>
+        <div class="foot-actions">
+          <button class="btn btn-ghost sm" data-toggle="b1">Detalles on-chain</button>
+          <button class="btn btn-cancel sm has-tip" disabled>
+            Cancelar
+            <span class="tip">Ya pasó el cancelDeadline — la reserva solo puede cerrarse vía redimir o disputa.</span>
+          </button>
+          <button class="btn btn-redeem has-tip" data-modal="redeem">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3 3 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Redimir NFT en cancha
+            <span class="tip">Presentá este botón en la cancha — Tx 8 quema tu Rent NFT y libera el pago al dueño.</span>
+          </button>
+        </div>
+      </div>
+      <details class="expand" id="b1">
+        <summary>Datum + Tx detail</summary>
+        <div class="expand-body">
+          <div class="row"><span class="k">utxo</span><span class="v">9d3a…f7c2#0</span></div>
+          <div class="row"><span class="k">slotId</span><span class="v">137</span></div>
+          <div class="row"><span class="k">status</span><span class="v">Constr 2 · Confirmed</span></div>
+          <div class="row"><span class="k">slotStart</span><span class="v">2026-05-26 19:00 UTC</span></div>
+          <div class="row"><span class="k">customerPkh</span><span class="v">a4f1c9…3b21d8</span></div>
+          <div class="row"><span class="k">slotEnd</span><span class="v">2026-05-26 20:00 UTC</span></div>
+          <div class="row"><span class="k">ownerPkh</span><span class="v">62fd3a…0c4811</span></div>
+          <div class="row"><span class="k">cancelDeadline</span><span class="v">2026-05-25 19:00 UTC</span></div>
+          <div class="row"><span class="k">rentNFTName</span><span class="v">5254 5f32 3032…</span></div>
+          <div class="row"><span class="k">rentPrice</span><span class="v">40 000 000 lovelace</span></div>
+          <div class="row"><span class="k">paymentAddress</span><span class="v">addr1q…owner ↗</span></div>
+          <div class="row"><span class="k">lovelace en UTxO</span><span class="v">43 000 000</span></div>
+        </div>
+      </details>
+    </article>
+
+    <!-- ─────────────────────────────────────────
+         2. CONFIRMED — futura (CANCEL available)
+            Date.now() < cancelDeadline
+         ───────────────────────────────────────── -->
+    <article class="card" data-status="confirmed">
+      <div class="card-top">
+        <div class="thumb">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+            <rect width="100" height="100" fill="url(#g-clay)"/>
+            <line x1="20" y1="50" x2="80" y2="50" stroke="rgba(255,255,255,.3)" stroke-width="1"/>
+            <line x1="50" y1="20" x2="50" y2="80" stroke="rgba(255,255,255,.3)" stroke-width="1"/>
+            <rect x="35" y="35" width="30" height="30" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="1"/>
+          </svg>
+          <div class="corner">field #018</div>
+        </div>
+        <div class="body">
+          <h3>Polideportivo Norte</h3>
+          <div class="meta">
+            <strong>Av. Maipú 1480, Vicente López</strong>
+            <span class="sep"></span><span>Buenos Aires</span>
+            <span class="sep"></span><span class="mono" style="font-size:11px">slot #205</span>
+          </div>
+          <div class="when-block">
+            <div class="when-time">
+              <span class="d">Dom 31 may</span>
+              <span class="t">09:00 → 10:00</span>
+              <span class="dur">UTC · 60 min · en 5 días</span>
+            </div>
+            <span class="nft-tag">
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><path d="M6 0 1 3v6l5 3 5-3V3z" opacity=".4"/><path d="M6 0 1 3l5 3 5-3z"/></svg>
+              RT_2026W22_S205
+            </span>
+          </div>
+        </div>
+        <div class="right">
+          <span class="pill confirmed"><span class="pdot"></span>Confirmada</span>
+          <div class="price">45.00 ₳ <small>en escrow</small></div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <div class="foot-info">
+          <span class="badge">Podés cancelar hasta sáb 30 may · 09:00 UTC</span>
+          <span><span class="k">tx</span> <a href="https://preview.cardanoscan.io/transaction/c481aab205" target="_blank" rel="noopener">c481…b205 ↗</a></span>
+        </div>
+        <div class="foot-actions">
+          <button class="btn btn-ghost sm" data-toggle="b2">Detalles on-chain</button>
+          <button class="btn btn-cancel sm has-tip" data-modal="cancel">
+            Cancelar reserva
+            <span class="tip">Tx 6 · quema el NFT y devuelve la lovelace según el contrato.</span>
+          </button>
+          <button class="btn btn-redeem has-tip" disabled>
+            Redimir NFT
+            <span class="tip">Disponible cuando empiece el slot (Dom 09:00 UTC).</span>
+          </button>
+        </div>
+      </div>
+      <details class="expand" id="b2">
+        <summary>Datum + Tx detail</summary>
+        <div class="expand-body">
+          <div class="row"><span class="k">utxo</span><span class="v">c481…b205#1</span></div>
+          <div class="row"><span class="k">slotId</span><span class="v">205</span></div>
+          <div class="row"><span class="k">status</span><span class="v">Constr 2 · Confirmed</span></div>
+          <div class="row"><span class="k">slotStart</span><span class="v">2026-05-31 09:00 UTC</span></div>
+          <div class="row"><span class="k">customerPkh</span><span class="v">a4f1c9…3b21d8</span></div>
+          <div class="row"><span class="k">cancelDeadline</span><span class="v">2026-05-30 09:00 UTC</span></div>
+          <div class="row"><span class="k">rentPrice</span><span class="v">45 000 000 lovelace</span></div>
+          <div class="row"><span class="k">lovelace en UTxO</span><span class="v">48 000 000</span></div>
+        </div>
+      </details>
+    </article>
+
+    <!-- ─────────────────────────────────────────
+         3. CONFIRMED — slot ya terminó (DISPUTE available)
+            Date.now() > slotEnd, still Confirmed
+         ───────────────────────────────────────── -->
+    <article class="card" data-status="confirmed">
+      <div class="card-top">
+        <div class="thumb">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+            <rect width="100" height="100" fill="url(#g-night)"/>
+            <line x1="50" y1="0" x2="50" y2="100" stroke="rgba(255,255,255,.18)" stroke-width="1"/>
+            <circle cx="50" cy="50" r="14" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="1"/>
+          </svg>
+          <div class="corner">field #054</div>
+        </div>
+        <div class="body">
+          <h3>La Bombonerita</h3>
+          <div class="meta">
+            <strong>Mendoza 4350, La Boca</strong>
+            <span class="sep"></span><span>Buenos Aires</span>
+            <span class="sep"></span><span class="mono" style="font-size:11px">slot #221</span>
+          </div>
+          <div class="when-block">
+            <div class="when-time">
+              <span class="d">Mar 24 may</span>
+              <span class="t">21:00 → 22:00</span>
+              <span class="dur">UTC · pasó hace 47 h</span>
+            </div>
+            <span class="nft-tag">
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><path d="M6 0 1 3v6l5 3 5-3V3z" opacity=".4"/><path d="M6 0 1 3l5 3 5-3z"/></svg>
+              RT_2026W21_S221
+            </span>
+          </div>
+        </div>
+        <div class="right">
+          <span class="pill confirmed"><span class="pdot"></span>Confirmada</span>
+          <div class="price">55.00 ₳ <small>aún en escrow</small></div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <div class="foot-info">
+          <span class="badge danger">Slot terminó · NFT no redimido</span>
+          <span><span class="k">tx</span> <a href="https://preview.cardanoscan.io/transaction/aa17bb09cd" target="_blank" rel="noopener">aa17…09cd ↗</a></span>
+        </div>
+        <div class="foot-actions">
+          <button class="btn btn-ghost sm" data-toggle="b3">Detalles on-chain</button>
+          <button class="btn btn-cancel sm" disabled>Cancelar</button>
+          <button class="btn btn-dispute has-tip" data-modal="dispute">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v6m0 3.5v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
+            Abrir disputa
+            <span class="tip">¿No pudiste usar el slot? Tx 7 bloquea 10 ADA adicionales como depósito hasta que se resuelva.</span>
+          </button>
+        </div>
+      </div>
+      <details class="expand" id="b3">
+        <summary>Datum + Tx detail</summary>
+        <div class="expand-body">
+          <div class="row"><span class="k">utxo</span><span class="v">aa17…09cd#0</span></div>
+          <div class="row"><span class="k">slotId</span><span class="v">221</span></div>
+          <div class="row"><span class="k">status</span><span class="v">Constr 2 · Confirmed</span></div>
+          <div class="row"><span class="k">slotEnd</span><span class="v">2026-05-24 22:00 UTC</span></div>
+          <div class="row"><span class="k">customerPkh</span><span class="v">a4f1c9…3b21d8</span></div>
+          <div class="row"><span class="k">cancelDeadline</span><span class="v">2026-05-23 21:00 UTC (pasado)</span></div>
+          <div class="row"><span class="k">rentPrice</span><span class="v">55 000 000 lovelace</span></div>
+          <div class="row"><span class="k">disputeDeposit</span><span class="v">Nothing</span></div>
+        </div>
+      </details>
+    </article>
+
+    <!-- ─────────────────────────────────────────
+         4. DISPUTED — already opened
+         ───────────────────────────────────────── -->
+    <article class="card" data-status="disputed">
+      <div class="card-top">
+        <div class="thumb">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+            <rect width="100" height="100" fill="#a8736a"/>
+            <line x1="50" y1="0" x2="50" y2="100" stroke="rgba(255,255,255,.22)" stroke-width="1"/>
+            <circle cx="50" cy="50" r="20" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="1"/>
+          </svg>
+          <div class="corner">field #067</div>
+        </div>
+        <div class="body">
+          <h3>La Quinta</h3>
+          <div class="meta">
+            <strong>Ruta 27 km 8, Tigre</strong>
+            <span class="sep"></span><span>Buenos Aires</span>
+            <span class="sep"></span><span class="mono" style="font-size:11px">slot #142</span>
+          </div>
+          <div class="when-block">
+            <div class="when-time">
+              <span class="d">Sáb 26 abr</span>
+              <span class="t">18:00 → 19:00</span>
+              <span class="dur">UTC · disputa abierta hace 9 días</span>
+            </div>
+          </div>
+        </div>
+        <div class="right">
+          <span class="pill disputed"><span class="pdot"></span>En disputa</span>
+          <div class="price">50.00 ₳ <small>40 + 10 ₳ depósito</small></div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <div class="foot-info">
+          <span class="badge danger">Esperando resolución de la plataforma · Tx 11/12</span>
+          <span><span class="k">tx</span> <a href="https://preview.cardanoscan.io/transaction/be4d2200" target="_blank" rel="noopener">be4d…2200 ↗</a></span>
+        </div>
+        <div class="foot-actions">
+          <button class="btn btn-ghost sm" data-toggle="b4">Detalles on-chain</button>
+          <button class="btn sm">Subir evidencia</button>
+        </div>
+      </div>
+      <details class="expand" id="b4">
+        <summary>Datum + Tx detail</summary>
+        <div class="expand-body">
+          <div class="row"><span class="k">utxo</span><span class="v">be4d…2200#0</span></div>
+          <div class="row"><span class="k">slotId</span><span class="v">142</span></div>
+          <div class="row"><span class="k">status</span><span class="v">Constr 5 · Disputed</span></div>
+          <div class="row"><span class="k">disputeDeposit</span><span class="v">Just 10 000 000</span></div>
+          <div class="row"><span class="k">customerPkh</span><span class="v">a4f1c9…3b21d8</span></div>
+          <div class="row"><span class="k">rentPrice</span><span class="v">40 000 000 lovelace</span></div>
+        </div>
+      </details>
+    </article>
+
+    <!-- ─────────────────────────────────────────
+         5. COMPLETED — historical
+         ───────────────────────────────────────── -->
+    <article class="card" data-status="completed">
+      <div class="card-top">
+        <div class="thumb">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+            <rect width="100" height="100" fill="url(#g-blue)"/>
+            <line x1="0" y1="20" x2="100" y2="20" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
+            <line x1="0" y1="80" x2="100" y2="80" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
+            <circle cx="50" cy="50" r="20" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
+          </svg>
+          <div class="corner">field #042</div>
+        </div>
+        <div class="body">
+          <h3>Club Atlético Sud</h3>
+          <div class="meta">
+            <strong>Av. Rivadavia 5100, Caballito</strong>
+            <span class="sep"></span><span>Buenos Aires</span>
+            <span class="sep"></span><span class="mono" style="font-size:11px">slot #88</span>
+          </div>
+          <div class="when-block">
+            <div class="when-time">
+              <span class="d">Mié 20 may</span>
+              <span class="t">20:00 → 21:30</span>
+              <span class="dur">UTC · jugada · hace 6 días</span>
+            </div>
+          </div>
+        </div>
+        <div class="right">
+          <span class="pill completed"><span class="pdot"></span>Jugada</span>
+          <div class="price">60.00 ₳ <small>liberado al dueño</small></div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <div class="foot-info">
+          <span class="badge">NFT quemado · pago liberado</span>
+          <span><span class="k">tx 8</span> <a href="https://preview.cardanoscan.io/transaction/77ee10ab" target="_blank" rel="noopener">77ee…10ab ↗</a></span>
+        </div>
+        <div class="foot-actions">
+          <a class="btn btn-ghost sm" href="Field Detail.html">Reservar otra vez</a>
+          <button class="btn sm">★ Calificar</button>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <!-- ── state previews (design reference) ─────────── -->
+  <div class="preview-rail">
+    <h2>Otros estados de la página</h2>
+    <div class="preview-grid">
+      <div class="state-card">
+        <svg width="36" height="36" viewBox="0 0 36 36" fill="none" style="margin-bottom:10px"><rect x="6" y="10" width="24" height="18" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M6 16h24" stroke="currentColor" stroke-width="1.6"/><circle cx="11" cy="22" r="1.4" fill="currentColor"/></svg>
+        <h2>Wallet no conectada</h2>
+        <p>Conectá tu wallet de Cardano para ver tus reservas activas.</p>
+        <button class="btn btn-primary">Conectar wallet</button>
+      </div>
+      <div class="state-card">
+        <div class="spinner"></div>
+        <h2>Cargando tus reservas…</h2>
+        <p>Leyendo UTxOs en RENT_VALIDATOR_ADDR vía Blockfrost.</p>
+      </div>
+      <div class="state-card">
+        <svg width="36" height="36" viewBox="0 0 36 36" fill="none" style="margin-bottom:10px"><circle cx="18" cy="18" r="13" stroke="currentColor" stroke-width="1.6"/><path d="M12 18l4 4 8-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <h2>No tenés reservas activas</h2>
+        <p>Cuando confirmes un slot aparecerá acá.</p>
+        <a class="btn btn-primary" href="Field Discovery.html">Explorar canchas</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL: Cancel ──────────────────────────────────── -->
+<div class="modal-backdrop" id="m-cancel">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="icon danger">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 8v5m0 3v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/></svg>
+      </div>
+      <h3>¿Cancelar la reserva?</h3>
+      <p>Esto envía una transacción a la cadena: se quema tu Rent NFT y el contrato decide cuánta lovelace volver a tu wallet.</p>
+    </div>
+    <div class="modal-body">
+      <div class="summary">
+        <div class="r"><span class="k">Cancha</span><span class="v" style="font-family:Inter">Polideportivo Norte</span></div>
+        <div class="r"><span class="k">Slot</span><span class="v" style="font-family:Inter">Dom 31 may · 09:00 UTC</span></div>
+        <div class="r"><span class="k">UTxO</span><span class="v">c481…b205#1</span></div>
+        <div class="r"><span class="k">Redeemer</span><span class="v">Constr 2 · CancelRent</span></div>
+        <div class="r"><span class="k">Lovelace bloqueada</span><span class="v">48 000 000</span></div>
+        <div class="r"><span class="k">Burn token</span><span class="v">RENT_POLICY · RT_…S205</span></div>
+      </div>
+      <div class="warning">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;margin-top:1px"><path d="M8 2 1.5 14h13z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6v3.5M8 11.5v.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Vas a firmar con tu wallet. Necesitás colateral puro-ADA ≥ 5 ₳ disponible.
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close>Volver</button>
+      <button class="btn btn-primary" data-close style="background:var(--accent-deep);border-color:var(--accent-deep)">Firmar Tx 6</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL: Dispute ─────────────────────────────────── -->
+<div class="modal-backdrop" id="m-dispute">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="icon warn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3 2 21h20z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 9v5M12 17v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </div>
+      <h3>Abrir disputa por este slot</h3>
+      <p>Solo abrí una disputa si el dueño no cumplió con la reserva. La plataforma revisa la evidencia y resuelve a favor del cliente o del dueño.</p>
+    </div>
+    <div class="modal-body">
+      <div class="summary">
+        <div class="r"><span class="k">Cancha</span><span class="v" style="font-family:Inter">La Bombonerita</span></div>
+        <div class="r"><span class="k">Slot terminado</span><span class="v" style="font-family:Inter">Mar 24 may · 22:00 UTC</span></div>
+        <div class="r"><span class="k">UTxO</span><span class="v">aa17…09cd#0</span></div>
+        <div class="r"><span class="k">Redeemer</span><span class="v">Constr 3 · OpenDispute</span></div>
+        <div class="r"><span class="k">Datum nuevo</span><span class="v">status=Disputed,<br/>disputeDeposit=Just 10₳</span></div>
+      </div>
+      <div class="warning">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;margin-top:1px"><circle cx="8" cy="8" r="6.4" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5v4M8 11v.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Se bloquean <b>10 ADA adicionales</b> como depósito de garantía. Si la plataforma resuelve contra vos, perdés ese depósito.
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close>Volver</button>
+      <button class="btn btn-primary" data-close style="background:var(--amber-deep);border-color:var(--amber-deep)">Firmar Tx 7 — bloquear 10 ₳</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL: Redeem ──────────────────────────────────── -->
+<div class="modal-backdrop" id="m-redeem">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="icon" style="background:var(--mint-bg);color:var(--mint-ink)">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h3>Redimir Rent NFT en la cancha</h3>
+      <p>Mostrale este botón al encargado. Al firmar se quema el NFT y la lovelace en escrow se libera al dueño del campo.</p>
+    </div>
+    <div class="modal-body">
+      <div class="summary">
+        <div class="r"><span class="k">Cancha</span><span class="v" style="font-family:Inter">Cancha del Parque</span></div>
+        <div class="r"><span class="k">Slot activo</span><span class="v" style="font-family:Inter">Hoy 19:00–20:00 UTC</span></div>
+        <div class="r"><span class="k">UTxO</span><span class="v">9d3a…f7c2#0</span></div>
+        <div class="r"><span class="k">Redeemer</span><span class="v">Constr 4 · RedeemAtField</span></div>
+        <div class="r"><span class="k">Output → owner</span><span class="v">addr1q…owner</span></div>
+        <div class="r"><span class="k">Burn token</span><span class="v">RT_2026W22_S137</span></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close>Volver</button>
+      <button class="btn btn-redeem" data-close>Firmar Tx 8</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // tab filter
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
+      const f = t.dataset.filter;
+      document.querySelectorAll('.card[data-status]').forEach(b => {
+        b.style.display = (f === 'all' || b.dataset.status === f) ? '' : 'none';
+      });
+    });
+  });
+
+  // modals
+  document.querySelectorAll('[data-modal]').forEach(b => {
+    b.addEventListener('click', () => {
+      const m = document.getElementById('m-' + b.dataset.modal);
+      if (m) m.classList.add('on');
+    });
+  });
+  document.querySelectorAll('[data-close]').forEach(b => {
+    b.addEventListener('click', () => b.closest('.modal-backdrop').classList.remove('on'));
+  });
+  document.querySelectorAll('.modal-backdrop').forEach(bd => {
+    bd.addEventListener('click', e => { if (e.target === bd) bd.classList.remove('on'); });
+  });
+
+  // reload faux state
+  const rb = document.getElementById('reload-btn');
+  if (rb) rb.addEventListener('click', () => {
+    rb.style.opacity = .5;
+    setTimeout(() => { rb.style.opacity = 1; }, 600);
+  });
+</script>
+</body>
+</html>
