@@ -13,7 +13,7 @@ import {
   RENT_MINT_POLICY_ID,
 } from '../lib/config'
 import {
-  pConstr, pInt,
+  pConstr, pInt, pBytes,
   pConfirmed, pNothing, pJust,
   pDisputed,
   buildRentDatumHex,

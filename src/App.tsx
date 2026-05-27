@@ -10,7 +10,7 @@ import RegisterOwner from './pages/RegisterOwner'
 
 export default function App() {
   return (
-    <MeshProvider network={0}>
+    <MeshProvider>
       <BrowserRouter>
         <div className="min-h-screen bg-[var(--paper)]">
           <Navbar />
