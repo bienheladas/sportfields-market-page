@@ -97,7 +97,7 @@ export function WalletModal({ open, onClose }: WalletModalProps) {
       >
         <header className="relative px-6 pt-[22px] pb-3.5">
           <h2 id="wallet-modal-title" className="m-0 mb-1 text-[18px] font-semibold tracking-[-0.012em]">
-            Conecta tu wallet
+            Conectá tu wallet
           </h2>
           <p className="m-0 text-[13px] text-[var(--muted)] leading-[1.4]">
             Seleccioná una wallet CIP-30 compatible.

@@ -52,7 +52,7 @@ export default function RegisterOwner() {
           Ya estás registrado
         </h1>
         <p className="m-0 mb-9 text-base text-[var(--muted)] max-w-[540px] leading-snug">
-          Tu wallet ya tiene un Owner NFT acuñado. Puedes gestionar tu cancha y los slots
+          Tu wallet ya tiene un Owner NFT acuñado. Podés gestionar tu cancha y los slots
           desde el panel de propietario.
         </p>
         <div className="flex gap-2.5">
@@ -84,7 +84,7 @@ export default function RegisterOwner() {
       {step === 'form' && (
         <>
           <Heading
-            title="Registra tu cancha en Sportfields"
+            title="Registrá tu cancha en Sportfields"
             lede="Una vez registrada, podrás definir precios e inicializar slots semanales. La info se guarda on-chain como parte de tu Owner NFT."
           />
           <FormStep
@@ -296,7 +296,7 @@ function FormStep({
         </div>
 
         <Banner tone="mint" className="mt-2">
-          Tu Owner NFT (token name = PKH de tu wallet) prueba la propiedad de la cancha. Solo tú puedes actualizar estos datos después con <strong>Tx 10</strong>.
+          Tu Owner NFT (token name = PKH de tu wallet) prueba la propiedad de la cancha. Solo vos podés actualizar estos datos después con <strong>Tx 10</strong>.
         </Banner>
       </div>
 
@@ -458,7 +458,7 @@ function SuccessStep({
         </div>
         <h2 className="m-0 mb-2 text-[24px] font-bold tracking-[-0.015em] text-center">¡Cancha registrada!</h2>
         <p className="m-0 mb-6 text-center text-[var(--muted)] text-[14px] max-w-[420px] mx-auto leading-snug">
-          Tu Owner NFT está acuñado y los 502 ADA quedaron bloqueados en el script. Ahora puedes inicializar los 168 slots semanales desde tu panel.
+          Tu Owner NFT está acuñado y los 502 ADA quedaron bloqueados en el script. Ahora podés inicializar los 168 slots semanales desde tu panel.
         </p>
 
         <div className="bg-[var(--paper-2)] border border-[var(--line)] rounded-[10px] px-4 py-3.5 mb-5 flex items-center justify-between gap-3 flex-wrap">
