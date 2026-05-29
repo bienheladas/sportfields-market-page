@@ -5,14 +5,13 @@
 // Datos:
 //   useRentSlots(ownerNFT)      → todos los slots de esta cancha
 //   useOwnerRecord(ownerPkh)    → stats de reputación + metadata canónica
-//   useWallet() de @meshsdk     → estado de la wallet del visitante
+//   useLucid()                  → estado de la wallet del visitante
 //
-// Identidad del viewer: extraemos el pkh del bech32 con
-//   resolvePaymentKeyHash(address) — de @meshsdk/core.
+// Identidad del viewer: pkh extraído directamente de useLucid().
 
 import * as React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useWallet } from '@meshsdk/react';
+import { useLucid } from '../lib/LucidContext';
 
 import type { RentDatum } from '../components/types';
 import {
@@ -20,13 +19,12 @@ import {
   parseLatLong,
   shortenAddr,
 } from '../components/lib';
-import { normalizeAddress } from '../lib/decoders';
-import { addressToPkh } from '../hooks/useReserveSlot';
 import { useRentSlots } from '../hooks/useRentSlots';
 import { useOwnerRecord } from '../hooks/useOwnerRecord';
 import { useCancelSlot } from '../hooks/useCancelSlot';
 
-import { WeekCalendar, CalendarLegend, type RentSlotUtxoLike } from '../components/WeekCalendar';
+import { WeekCalendar, CalendarLegend } from '../components/WeekCalendar';
+import type { RentSlotUtxo } from '../hooks/useRentSlots';
 import { BookingPanel } from '../components/BookingPanel';
 import { WalletModal } from '../components/WalletModal';
 import { FieldMap } from '../components/FieldMap';
@@ -39,7 +37,7 @@ import { useReserveSlot } from '../hooks/useReserveSlot';
 export default function FieldDetail() {
   const { ownerNFT = '' } = useParams<{ ownerNFT: string }>();
   const navigate = useNavigate();
-  const { connected, wallet } = useWallet();
+  const { connected, pkh: viewerPkh } = useLucid();
 
   const { slots, loading: slotsLoading, error: slotsError, reload } = useRentSlots(ownerNFT);
 
@@ -48,7 +46,7 @@ export default function FieldDetail() {
   const ownerPkh = slots?.[0]?.datum.ownerPkh ?? '';
   const { record, loading: recordLoading } = useOwnerRecord(ownerPkh);
 
-  const [selected, setSelected] = React.useState<RentSlotUtxoLike | null>(null);
+  const [selected, setSelected] = React.useState<RentSlotUtxo | null>(null);
   const [walletModalOpen, setWalletModalOpen] = React.useState(false);
   const { reserve, loading: reserving, error: reserveError } = useReserveSlot();
   const { cancel: cancelSlot } = useCancelSlot();
@@ -56,16 +54,6 @@ export default function FieldDetail() {
   const [cancelTxHash, setCancelTxHash] = React.useState<string | null>(null);
 
   const calendarRef = React.useRef<HTMLDivElement>(null);
-
-  // ── Viewer PKH — derivado del mismo getChangeAddress() que usan los hooks de tx,
-  // garantizando que coincida exactamente con el customerPkh almacenado en el datum.
-  const [viewerPkh, setViewerPkh] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    if (!connected || !wallet) { setViewerPkh(null); return; }
-    wallet.getChangeAddress()
-      .then(addr => setViewerPkh(addressToPkh(normalizeAddress(addr))))
-      .catch(() => setViewerPkh(null));
-  }, [connected, wallet]);
 
   // ── Identidad de la cancha (del datum o del OwnerRecord) ──────
   const identity = React.useMemo(() => {
@@ -102,7 +90,7 @@ export default function FieldDetail() {
   }, [slots]);
 
   // ── Reserva activa del viewer en esta cancha ────────────────
-  const myActiveSlot = React.useMemo<RentSlotUtxoLike | null>(() => {
+  const myActiveSlot = React.useMemo<RentSlotUtxo | null>(() => {
     if (!viewerPkh || !slots) return null;
     return slots.find(
       (s) =>
@@ -236,7 +224,7 @@ export default function FieldDetail() {
           <WeekCalendar
             slots={slots ?? []}
             selectedSlotId={selected?.datum.slotId ?? null}
-            onSelectSlot={(s) => setSelected(s)}
+            onSelectSlot={(s) => setSelected(s as RentSlotUtxo)}
           />
         )}
       </section>
@@ -270,7 +258,7 @@ export default function FieldDetail() {
       <BookingPanel
         slot={selected}
         connected={connected}
-        viewerPkh={viewerPkh}
+        viewerPkh={viewerPkh || null}
         onClose={() => setSelected(null)}
         onConnectWallet={() => setWalletModalOpen(true)}
         onReserve={async (s) => {
@@ -279,8 +267,9 @@ export default function FieldDetail() {
           setReserveTxHash(txHash);
           setTimeout(() => reload(), 3_000);
         }}
-        onCancel={async (s) => {
-          const txHash = await cancelSlot(s);
+        onCancel={async (_s) => {
+          if (!selected) return;
+          const txHash = await cancelSlot(selected);
           setSelected(null);
           setCancelTxHash(txHash);
           setTimeout(() => reload(), 3_000);
@@ -393,7 +382,7 @@ function PriceCard({
   commissionBps: number;
   availableNow: number;
   onSeeCalendar: () => void;
-  myActiveSlot: RentSlotUtxoLike | null;
+  myActiveSlot: RentSlotUtxo | null;
 }) {
   return (
     <aside className="sticky top-[84px] self-start bg-[var(--paper)] border border-[var(--line)] rounded-[14px] p-5 pt-5.5 shadow-[0_1px_2px_rgba(20,16,8,.04),0_6px_18px_rgba(20,16,8,.06)]">

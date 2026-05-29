@@ -1,20 +1,21 @@
 import * as React from 'react'
-import { useWallet } from '@meshsdk/react'
-import { BlockfrostProvider, MeshTxBuilder } from '@meshsdk/core'
-import { Serialization } from '@cardano-sdk/core'
+import { Data, Constr } from '@lucid-evolution/lucid'
 import axios from 'axios'
-import type { OwnerRecord } from '../components/types'
-import { buildRentDatumHex, pAvailable, pNothing } from '../lib/plutus-cbor'
-import { normalizeMeshUtxos, normalizeAddress, decodeRentDatum } from '../lib/decoders'
-import { addressToPkh } from './useReserveSlot'
+import { useLucid } from '../lib/LucidContext'
+import { decodeRentDatum } from '../lib/decoders'
 import {
   BLOCKFROST_KEY, BLOCKFROST_URL,
-  RENT_VALIDATOR_ADDR, COMPANY_PKH,
+  RENT_VALIDATOR_ADDR,
+  COMPANY_PKH,
+  OWNER_NFT_POLICY,
+  RENT_NFT_POLICY,
+  RENT_SPEND_COMPILED,
 } from '../lib/config'
+import type { OwnerRecord } from '../components/types'
 
-const BATCH_SIZE     = 24
-const SLOT_LOVELACE  = '3000000'
-const COMMISSION_BPS = 100
+const BATCH_SIZE    = 24
+const SLOT_LOVELACE = 3_000_000n
+const COMMISSION_BPS = 100n
 
 export interface DaySchedule {
   enabled: boolean
@@ -37,25 +38,24 @@ export interface InitWeekProgress {
 }
 
 export function useInitWeek() {
-  const { wallet, connected } = useWallet()
+  const { lucid, pkh: ownerPkh } = useLucid()
   const [loading, setLoading]   = React.useState(false)
   const [error, setError]       = React.useState<string | null>(null)
   const [progress, setProgress] = React.useState<InitWeekProgress | null>(null)
 
   const initWeek = React.useCallback(
     async (record: OwnerRecord, params: InitWeekParams): Promise<string[]> => {
-      if (!connected || !wallet) throw new Error('Wallet no conectada.')
+      if (!lucid) throw new Error('Wallet no conectada.')
 
       setLoading(true)
       setError(null)
       setProgress(null)
 
       try {
-        const walletAddress = normalizeAddress(await wallet.getChangeAddress())
-        const ownerPkh      = addressToPkh(walletAddress)
-        const weekStartMs   = params.weekStart.getTime()
+        const weekStartMs = params.weekStart.getTime()
+        const ownerNFTNameHex = ownerPkh  // token name = pkh
 
-        const allSlots: { slotId: number; datumHex: string }[] = []
+        const allSlots: { slotId: number; datum: string }[] = []
 
         for (let day = 0; day < 7; day++) {
           const sched = params.schedule[day]
@@ -66,86 +66,66 @@ export function useInitWeek() {
             const slotEnd        = slotStart + 3_600_000
             const cancelDeadline = slotStart - params.cancelDeadlineHours * 3_600_000
 
-            allSlots.push({
-              slotId,
-              datumHex: buildRentDatumHex({
-                slotId,
-                slotStart,
-                slotEnd,
-                cancelDeadline,
-                rentPrice:      Number(params.rentPriceLovelace),
-                commissionBps:  COMMISSION_BPS,
-                ownerNFTName:   Buffer.from(ownerPkh, 'hex'),
-                ownerPkh:       Buffer.from(ownerPkh, 'hex'),
-                companyPkh:     Buffer.from(COMPANY_PKH, 'hex'),
-                status:         pAvailable(),
-                customerPkh:    pNothing(),
-                rentNFTName:    pNothing(),
-                disputeDeposit: pNothing(),
-                fieldName:      Buffer.from(record.fieldName, 'hex'),
-                fieldAddress:   Buffer.from(record.address, 'hex'),
-                phone:          Buffer.from(record.phone, 'hex'),
-                email:          Buffer.from(record.email, 'hex'),
-                lat:            Buffer.from(record.lat, 'hex'),
-                long_:          Buffer.from(record.long, 'hex'),
-                paymentAddress: Buffer.from(record.paymentAddress, 'hex'),
-              }),
-            })
+            const datum = Data.to(new Constr(0, [
+              BigInt(slotId),
+              BigInt(slotStart),
+              BigInt(slotEnd),
+              BigInt(cancelDeadline),
+              params.rentPriceLovelace,
+              COMMISSION_BPS,
+              ownerNFTNameHex,
+              ownerPkh,
+              COMPANY_PKH,
+              new Constr(0, []),   // Available
+              new Constr(1, []),   // customerPkh = None
+              new Constr(1, []),   // rentNFTName = None
+              new Constr(1, []),   // disputeDeposit = None
+              record.fieldName,
+              record.address,
+              record.phone,
+              record.email,
+              record.lat,
+              record.long,
+              record.paymentAddress,
+            ]))
+
+            allSlots.push({ slotId, datum })
           }
         }
 
         if (allSlots.length === 0) throw new Error('El horario configurado no tiene slots.')
 
-        const provider = new BlockfrostProvider(BLOCKFROST_KEY)
-
         // Filter out slots already on-chain for this owner this week
-        const existingIds = await fetchExistingSlotIds(ownerPkh, params.weekStart.getTime())
+        const existingIds = await fetchExistingSlotIds(ownerPkh, weekStartMs)
         const pendingSlots = allSlots.filter(s => !existingIds.has(s.slotId))
         if (pendingSlots.length === 0) throw new Error('Todos los slots de esta semana ya fueron creados.')
-        const slotsToCreate = pendingSlots
 
         const batches: typeof allSlots[] = []
-        for (let i = 0; i < slotsToCreate.length; i += BATCH_SIZE)
-          batches.push(slotsToCreate.slice(i, i + BATCH_SIZE))
+        for (let i = 0; i < pendingSlots.length; i += BATCH_SIZE)
+          batches.push(pendingSlots.slice(i, i + BATCH_SIZE))
 
         const txHashes: string[] = []
-        setProgress({ totalSlots: slotsToCreate.length, batchCount: batches.length, currentBatch: 1, txHashes: [] })
-
-        let currentUtxos = normalizeMeshUtxos((await wallet.getUtxos()) as unknown[])
+        setProgress({ totalSlots: pendingSlots.length, batchCount: batches.length, currentBatch: 1, txHashes: [] })
 
         for (let b = 0; b < batches.length; b++) {
-          setProgress({ totalSlots: slotsToCreate.length, batchCount: batches.length, currentBatch: b + 1, txHashes: [...txHashes] })
+          setProgress({ totalSlots: pendingSlots.length, batchCount: batches.length, currentBatch: b + 1, txHashes: [...txHashes] })
 
-          const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider })
-          txBuilder.changeAddress(walletAddress).selectUtxosFrom(currentUtxos)
-
+          let txBuilder = lucid.newTx()
           for (const slot of batches[b]) {
-            txBuilder
-              .txOut(RENT_VALIDATOR_ADDR, [{ unit: 'lovelace', quantity: SLOT_LOVELACE }])
-              .txOutInlineDatumValue(slot.datumHex, 'CBOR')
+            txBuilder = txBuilder.pay.ToContract(
+              RENT_VALIDATOR_ADDR,
+              { kind: 'inline', value: slot.datum },
+              { lovelace: SLOT_LOVELACE },
+            )
           }
 
-          const unsignedTx  = await txBuilder.complete()
-          const cip30Result = await wallet.signTx(unsignedTx, false)
-          const firstByte   = parseInt(cip30Result.slice(0, 2), 16)
-
-          let finalTxHex: string
-          if (firstByte >= 0x80 && firstByte <= 0x9f) {
-            finalTxHex = cip30Result
-          } else {
-            const tx     = Serialization.Transaction.fromCbor(Serialization.TxCBOR(unsignedTx))
-            const witSet = Serialization.TransactionWitnessSet.fromCbor(cip30Result as any)
-            const txWit  = tx.witnessSet()
-            const vkeys  = witSet.vkeys()
-            if (vkeys && vkeys.size() > 0) txWit.setVkeys(vkeys)
-            tx.setWitnessSet(txWit)
-            finalTxHex = String(tx.toCbor())
-          }
+          const tx     = await txBuilder.complete()
+          const signed = await tx.sign.withWallet().complete()
 
           let txHash: string
           let alreadyConfirmed = false
           try {
-            txHash = await provider.submitTx(finalTxHex)
+            txHash = await signed.submit()
           } catch (submitErr) {
             const msg = submitErr instanceof Error ? submitErr.message : String(submitErr)
             if (msg.includes('already been included') || msg.includes('inputs are spent')) {
@@ -159,11 +139,10 @@ export function useInitWeek() {
 
           if (b < batches.length - 1) {
             if (!alreadyConfirmed) await waitForTx(txHash)
-            currentUtxos = normalizeMeshUtxos((await wallet.getUtxos()) as unknown[])
           }
         }
 
-        setProgress({ totalSlots: slotsToCreate.length, batchCount: batches.length, currentBatch: batches.length, txHashes })
+        setProgress({ totalSlots: pendingSlots.length, batchCount: batches.length, currentBatch: batches.length, txHashes })
         return txHashes
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
@@ -173,7 +152,7 @@ export function useInitWeek() {
         setLoading(false)
       }
     },
-    [wallet, connected],
+    [lucid, ownerPkh],
   )
 
   return { initWeek, loading, error, progress }

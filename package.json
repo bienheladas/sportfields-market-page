@@ -10,8 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@meshsdk/core": "^1.9.0-beta.102",
-    "@meshsdk/react": "^2.0.0-beta.2",
+    "@lucid-evolution/lucid": "^0.4.24",
     "axios": "^1.16.1",
     "leaflet": "^1.9.4",
     "react": "^19.2.6",
@@ -36,6 +35,8 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12",
-    "vite-plugin-node-polyfills": "^0.28.0"
+    "vite-plugin-node-polyfills": "^0.28.0",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.6.0"
   }
 }

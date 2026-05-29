@@ -243,7 +243,7 @@ export function decodeOwnersDatum(hex: string): OwnersDatum {
   throw new Error(`Unknown OwnersDatum tag ${outer.tag}`)
 }
 
-export { bytesToUtf8 }
+export { bytesToUtf8, hexToBytes, bytesToHex }
 
 // CIP-19 address bytes → bech32 (Shelley base/enterprise/reward/pointer)
 function addrBytesToBech32(addrBytes: Uint8Array): string {
@@ -263,69 +263,3 @@ export function normalizeAddress(addr: string): string {
   }
 }
 
-// ── CIP-30 raw UTxO normalizer ─────────────────────────────────────────────
-// Mesh SDK beta may return wallet.getUtxos() as raw CIP-30 CBOR hex strings
-// instead of parsed objects. This converts either format to a consistent shape.
-
-export interface ParsedUtxo {
-  input: { txHash: string; outputIndex: number }
-  output: { address: string; amount: { unit: string; quantity: string }[] }
-}
-
-export function normalizeMeshUtxos(raw: unknown[]): ParsedUtxo[] {
-  const result: ParsedUtxo[] = []
-  for (const u of raw) {
-    if (typeof u !== 'string') {
-      if (u && typeof u === 'object') result.push(u as ParsedUtxo)
-      continue
-    }
-    try {
-      const bytes = hexToBytes(u)
-      const [outer] = decodeCbor(bytes, 0)
-      if (!Array.isArray(outer) || outer.length < 2) continue
-
-      const inp = outer[0]
-      const out = outer[1]
-      if (!Array.isArray(inp) || !Array.isArray(out)) continue
-
-      const txHash      = bytesToHex(asBytes(inp[0]))
-      const outputIndex = Number(asInt(inp[1]))
-      const addrBytes   = asBytes(out[0])
-      const address     = addrBytesToBech32(addrBytes)
-      const value       = out[1]
-
-      // Value: uint (pure ADA) | [lovelace, multiasset_map] (with tokens)
-      const amount: { unit: string; quantity: string }[] = []
-      let lovelace: bigint
-      if (typeof value === 'bigint' || typeof value === 'number') {
-        lovelace = BigInt(value)
-      } else if (Array.isArray(value) && value.length >= 2) {
-        lovelace = asInt(value[0])
-        // Decode each policy → asset → quantity from the multiasset map
-        const maValue = value[1]
-        if (isCborMap(maValue)) {
-          for (const [policyVal, assetMapVal] of maValue.entries) {
-            if (!(policyVal instanceof Uint8Array)) continue
-            const policyId = bytesToHex(policyVal)
-            if (!isCborMap(assetMapVal)) continue
-            for (const [assetNameVal, qtyVal] of assetMapVal.entries) {
-              if (!(assetNameVal instanceof Uint8Array)) continue
-              const assetName = bytesToHex(assetNameVal)
-              amount.push({ unit: policyId + assetName, quantity: String(asInt(qtyVal)) })
-            }
-          }
-        }
-        if (amount.length === 0) {
-          // Fallback sentinel so collateral filter still excludes non-pure UTxOs
-          amount.push({ unit: 'multiasset', quantity: '1' })
-        }
-      } else {
-        continue
-      }
-      amount.unshift({ unit: 'lovelace', quantity: String(lovelace) })
-
-      result.push({ input: { txHash, outputIndex }, output: { address, amount } })
-    } catch { /* skip malformed */ }
-  }
-  return result
-}

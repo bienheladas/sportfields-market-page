@@ -25,8 +25,9 @@ export function useMyReservations(customerPkh: string | null) {
             const datum: RentDatum = decodeRentDatum(u.inline_datum)
             if (datum.customerPkh !== customerPkh) continue
             if (!CUSTOMER_STATUSES.includes(datum.status)) continue
-            const lovelace = BigInt(u.amount.find((a: any) => a.unit === 'lovelace')?.quantity ?? '0')
-            parsed.push({ txHash: u.tx_hash, outputIndex: u.output_index, datum, lovelace })
+            const lovelace = BigInt(u.amount.find(a => a.unit === 'lovelace')?.quantity ?? '0')
+            parsed.push({ txHash: u.tx_hash, outputIndex: u.output_index, datum, lovelace,
+              address: RENT_VALIDATOR_ADDR, rawDatum: u.inline_datum! })
           } catch { /* skip malformed */ }
         }
         parsed.sort((a, b) => a.datum.slotStart - b.datum.slotStart)

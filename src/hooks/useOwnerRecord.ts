@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getAddressUtxos } from '../lib/blockfrost'
 import { decodeOwnersDatum } from '../lib/decoders'
-import { OWNERS_VALIDATOR_ADDR, OWNERS_MINT_POLICY_ID } from '../lib/config'
+import { OWNERS_VALIDATOR_ADDR, OWNER_NFT_POLICY } from '../lib/config'
 import type { OwnerRecord } from '../components/types'
 
 export function useOwnerRecord(ownerPkhHex: string | null) {
@@ -15,7 +15,7 @@ export function useOwnerRecord(ownerPkhHex: string | null) {
     setError(null)
     getAddressUtxos(OWNERS_VALIDATOR_ADDR)
       .then(utxos => {
-        const nftUnit = OWNERS_MINT_POLICY_ID + ownerPkhHex
+        const nftUnit = OWNER_NFT_POLICY + ownerPkhHex
         const utxo = utxos.find(u => u.amount.some(a => a.unit === nftUnit))
         if (!utxo || !utxo.inline_datum) { setRecord(null); return }
         const datum = decodeOwnersDatum(utxo.inline_datum)

@@ -1,22 +1,12 @@
 import * as React from 'react'
-import { useWallet } from '@meshsdk/react'
+import { useLucid } from '../lib/LucidContext'
 import { useMyReservations } from '../hooks/useMyReservations'
 import { ReservationCard } from '../components/ReservationCard'
-import { normalizeAddress } from '../lib/decoders'
-import { addressToPkh } from '../hooks/useReserveSlot'
 import type { SlotStatus } from '../components/types'
 
 export default function MyBookings() {
-  const { connected, wallet } = useWallet()
-  const [customerPkh, setCustomerPkh] = React.useState<string | null>(null)
+  const { connected, pkh: customerPkh } = useLucid()
   const [filter, setFilter] = React.useState<SlotStatus | 'all'>('all')
-
-  React.useEffect(() => {
-    if (!connected || !wallet) { setCustomerPkh(null); return }
-    wallet.getChangeAddress()
-      .then(addr => setCustomerPkh(addressToPkh(normalizeAddress(addr))))
-      .catch(() => setCustomerPkh(null))
-  }, [connected, wallet])
 
   const { slots, loading, error, reload } = useMyReservations(customerPkh)
 

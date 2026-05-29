@@ -1,28 +1,22 @@
 import * as React from 'react'
-import { useWallet } from '@meshsdk/react'
+import { useLucid } from '../lib/LucidContext'
 import { useOwnerRecord } from '../hooks/useOwnerRecord'
 import { useRentSlots } from '../hooks/useRentSlots'
+import { useCollectSlot } from '../hooks/useCollectSlot'
 import { OwnerRecordCard } from '../components/OwnerRecordCard'
 import { RentSlotRow } from '../components/RentSlotRow'
 import { InitWeekModal } from '../components/InitWeekModal'
-import { normalizeAddress } from '../lib/decoders'
-import { addressToPkh } from '../hooks/useReserveSlot'
+import type { RentSlotUtxo } from '../hooks/useRentSlots'
 
 export default function OwnerPanel() {
-  const { connected, wallet } = useWallet()
-  const [ownerPkh, setOwnerPkh] = React.useState<string | null>(null)
+  const { connected, pkh: ownerPkh } = useLucid()
 
-  React.useEffect(() => {
-    if (!connected || !wallet) { setOwnerPkh(null); return }
-    wallet.getChangeAddress()
-      .then(addr => setOwnerPkh(addressToPkh(normalizeAddress(addr))))
-      .catch(() => setOwnerPkh(null))
-  }, [connected, wallet])
-
-  const { record, loading: loadingRecord } = useOwnerRecord(ownerPkh)
-  const { slots, loading: loadingSlots }   = useRentSlots(record?.ownerNFTName)
+  const { record, loading: loadingRecord } = useOwnerRecord(ownerPkh || null)
+  const { slots, loading: loadingSlots, reload }   = useRentSlots(record?.ownerNFTName)
 
   const [initWeekOpen, setInitWeekOpen] = React.useState(false)
+  const { collectSlot, loading: collecting, error: collectError } = useCollectSlot()
+  const [collectTxHash, setCollectTxHash] = React.useState<string | null>(null)
 
   if (!connected) return (
     <div className="max-w-xl mx-auto px-4 py-16 text-center">
@@ -45,6 +39,16 @@ export default function OwnerPanel() {
     </div>
   )
 
+  const completedSlots = slots.filter(s => s.datum.status === 'Completed')
+
+  const handleCollect = async (slot: RentSlotUtxo) => {
+    try {
+      const txHash = await collectSlot(slot)
+      setCollectTxHash(txHash)
+      setTimeout(() => reload(), 3_000)
+    } catch { /* error shown in collectError */ }
+  }
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-6">
       <OwnerRecordCard
@@ -53,6 +57,18 @@ export default function OwnerPanel() {
         onUpdateInfo={() => alert('Tx 10 — próximamente')}
         onCollectPayments={() => alert('Tx 9 — próximamente')}
       />
+
+      {collectError && (
+        <div className="px-4 py-3 rounded-[10px] bg-[var(--rose-bg)] border border-[#ecb5ac] text-[var(--rose-ink)] text-sm">
+          Error al cobrar: {collectError}
+        </div>
+      )}
+      {collectTxHash && (
+        <div className="px-4 py-3 rounded-[10px] bg-[var(--mint-bg)] border border-[#b9d8c1] text-[#244d33] text-sm flex items-center justify-between">
+          <span>¡Cobro exitoso! Tx: <span className="font-mono">{collectTxHash.slice(0, 12)}…</span></span>
+          <button onClick={() => setCollectTxHash(null)} className="text-[var(--muted)] hover:text-[var(--ink)] ml-2">✕</button>
+        </div>
+      )}
 
       <section>
         <div className="flex items-center justify-between mb-3">
@@ -71,7 +87,19 @@ export default function OwnerPanel() {
         {loadingSlots && <p className="text-[var(--muted)] text-sm">Cargando slots…</p>}
         <div className="flex flex-col gap-2">
           {slots.map(s => (
-            <RentSlotRow key={s.txHash + '#' + s.outputIndex} datum={s.datum} />
+            <div key={s.txHash + '#' + s.outputIndex}>
+              <RentSlotRow datum={s.datum} />
+              {s.datum.status === 'Completed' && (
+                <button
+                  type="button"
+                  disabled={collecting}
+                  onClick={() => handleCollect(s)}
+                  className="mt-1 px-3 py-1.5 rounded-[8px] text-xs font-semibold border border-[var(--mint-ink)] text-[var(--mint-ink)] bg-[var(--mint-bg)] hover:opacity-80 disabled:opacity-40"
+                >
+                  {collecting ? 'Cobrando…' : 'Cobrar slot (Tx 9)'}
+                </button>
+              )}
+            </div>
           ))}
         </div>
         {!loadingSlots && slots.length === 0 && (

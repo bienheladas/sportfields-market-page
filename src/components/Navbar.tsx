@@ -1,10 +1,10 @@
-import * as React from 'react';
-import { NavLink } from 'react-router-dom';
-import { useWallet } from '@meshsdk/react';
-import { WalletButton } from './WalletButton';
+import * as React from 'react'
+import { NavLink } from 'react-router-dom'
+import { useLucid } from '../lib/LucidContext'
+import { WalletButton } from './WalletButton'
 
 export function Navbar() {
-  const { connected } = useWallet();
+  const { connected } = useLucid()
 
   return (
     <header className="sticky top-0 z-40 bg-[rgba(248,244,236,0.85)] backdrop-blur-md border-b border-[var(--line)]">
@@ -21,7 +21,7 @@ export function Navbar() {
         <WalletButton />
       </div>
     </header>
-  );
+  )
 }
 
 function NavItem({ to, end, children }: { to: string; end?: boolean; children: React.ReactNode }) {
@@ -38,7 +38,7 @@ function NavItem({ to, end, children }: { to: string; end?: boolean; children: R
     >
       {children}
     </NavLink>
-  );
+  )
 }
 
 function Brand() {
@@ -53,5 +53,5 @@ function Brand() {
       </span>
       Sportfields
     </NavLink>
-  );
+  )
 }

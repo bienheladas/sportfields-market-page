@@ -140,7 +140,7 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
   const fieldAddress = decodeBBS(datum.fieldAddress)
 
   const nftLabel = datum.rentNFTName
-    ? Buffer.from(datum.rentNFTName, 'hex').toString('utf8').slice(0, 20)
+    ? decodeBBS(datum.rentNFTName).slice(0, 20)
     : null
 
   // Active now = slot is ongoing

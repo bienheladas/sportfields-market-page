@@ -1,90 +1,86 @@
-// WalletModal.tsx — modal CIP-30 propio que reemplaza <CardanoWallet /> de Mesh.
+// WalletModal.tsx — CIP-30 wallet connection modal using Lucid Evolution.
 
-import * as React from 'react';
-import * as ReactDOM from 'react-dom';
-import { useWallet } from '@meshsdk/react';
-import { BrowserWallet } from '@meshsdk/core';
+import * as React from 'react'
+import * as ReactDOM from 'react-dom'
+import { useLucid } from '../lib/LucidContext'
 
 interface WalletDef {
-  key: string;
-  name: string;
-  site: string;
-  fallback: { color: string; glyph: string };
+  key: string
+  name: string
+  site: string
+  fallback: { color: string; glyph: string }
 }
 
-const WALLETS: WalletDef[] = [
+const WALLET_DEFS: WalletDef[] = [
   { key: 'lace',   name: 'Lace',   site: 'https://www.lace.io',      fallback: { color: '#1d3aff', glyph: '⌬' } },
   { key: 'eternl', name: 'Eternl', site: 'https://eternl.io',        fallback: { color: '#0033ad', glyph: '∞' } },
   { key: 'nami',   name: 'Nami',   site: 'https://namiwallet.io',    fallback: { color: '#349ea3', glyph: '🌊' } },
   { key: 'yoroi',  name: 'Yoroi',  site: 'https://yoroi-wallet.com', fallback: { color: '#3154cb', glyph: '◈' } },
   { key: 'flint',  name: 'Flint',  site: 'https://flint-wallet.com', fallback: { color: '#ec5e29', glyph: '🔥' } },
   { key: 'typhon', name: 'Typhon', site: 'https://typhonwallet.io',  fallback: { color: '#197cef', glyph: '⚡' } },
-];
+]
 
 export interface WalletModalProps {
-  open: boolean;
-  onClose: () => void;
+  open: boolean
+  onClose: () => void
 }
 
 type ErrorState =
   | { kind: 'network'; message: string }
   | { kind: 'rejected'; message: string }
   | { kind: 'other'; message: string }
-  | null;
+  | null
 
 export function WalletModal({ open, onClose }: WalletModalProps) {
-  const { connect, connected, connecting, name: currentName } = useWallet();
-  const [installed, setInstalled] = React.useState<Record<string, { icon?: string }>>({});
-  const [connectingKey, setConnectingKey] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<ErrorState>(null);
+  const { connectWallet, connected, walletName } = useLucid()
+  const [connectingKey, setConnectingKey] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<ErrorState>(null)
+
+  // Get installed wallets by checking window.cardano
+  const [installed, setInstalled] = React.useState<Record<string, { icon?: string }>>({})
 
   React.useEffect(() => {
-    if (!open) return;
-    setError(null);
-    setConnectingKey(null);
+    if (!open) return
+    setError(null)
+    setConnectingKey(null)
+    const map: Record<string, { icon?: string }> = {}
+    const cardano = (window as any).cardano ?? {}
+    for (const key of WALLET_DEFS.map(w => w.key)) {
+      if (cardano[key]) {
+        map[key] = { icon: cardano[key].icon }
+      }
+    }
+    setInstalled(map)
+  }, [open])
+
+  React.useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  const handleConnect = async (name: string) => {
+    setError(null)
+    setConnectingKey(name)
     try {
-      const list = BrowserWallet.getInstalledWallets() as Array<{ name: string; icon?: string }>;
-      const map: Record<string, { icon?: string }> = {};
-      for (const w of list) map[w.name.toLowerCase()] = { icon: w.icon };
-      setInstalled(map);
-    } catch {
-      setInstalled({});
+      await connectWallet(name)
+      onClose()
+    } catch (e: any) {
+      setError(classifyError(e))
+    } finally {
+      setConnectingKey(null)
     }
-  }, [open]);
+  }
 
-  React.useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
-  React.useEffect(() => {
-    if (open && connected && connectingKey) {
-      setConnectingKey(null);
-      onClose();
-    }
-  }, [open, connected, connectingKey, onClose]);
-
-  const handleConnect = async (walletKey: string) => {
-    setError(null);
-    setConnectingKey(walletKey);
-    try {
-      await connect(walletKey);
-    } catch (e) {
-      setConnectingKey(null);
-      setError(classifyError(e));
-    }
-  };
-
-  if (!open) return null;
+  if (!open) return null
 
   return ReactDOM.createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="wallet-modal-title"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
       className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto py-6 bg-[rgba(26,26,23,0.40)] backdrop-blur-[3px] animate-[wm-fade_180ms_ease]"
     >
       <style>{`
@@ -121,14 +117,14 @@ export function WalletModal({ open, onClose }: WalletModalProps) {
         {error && <ErrorBanner error={error} />}
 
         <div className="px-3 pb-3 pt-1 flex flex-col gap-0.5">
-          {WALLETS.map((w) => (
+          {WALLET_DEFS.map((w) => (
             <WalletRow
               key={w.key}
               def={w}
               installedIcon={installed[w.key]?.icon}
               isInstalled={w.key in installed}
-              isConnecting={connecting && connectingKey === w.key}
-              isCurrent={connected && currentName?.toLowerCase() === w.key}
+              isConnecting={connectingKey === w.key}
+              isCurrent={connected && walletName === w.key}
               disabled={!!connectingKey && connectingKey !== w.key}
               onConnect={() => handleConnect(w.key)}
             />
@@ -149,14 +145,14 @@ export function WalletModal({ open, onClose }: WalletModalProps) {
       </div>
     </div>,
     document.body
-  );
+  )
 }
 
 function WalletRow({
   def, installedIcon, isInstalled, isConnecting, isCurrent, disabled, onConnect,
 }: {
-  def: WalletDef; installedIcon?: string; isInstalled: boolean;
-  isConnecting: boolean; isCurrent: boolean; disabled: boolean; onConnect: () => void;
+  def: WalletDef; installedIcon?: string; isInstalled: boolean
+  isConnecting: boolean; isCurrent: boolean; disabled: boolean; onConnect: () => void
 }) {
   return (
     <div className={['relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors', isConnecting ? 'bg-[var(--paper-2)]' : 'hover:bg-[var(--paper-2)]'].join(' ')}>
@@ -202,7 +198,7 @@ function WalletRow({
         </a>
       )}
     </div>
-  );
+  )
 }
 
 function WalletIcon({ def, iconBase64 }: { def: WalletDef; iconBase64?: string }) {
@@ -214,12 +210,12 @@ function WalletIcon({ def, iconBase64 }: { def: WalletDef; iconBase64?: string }
     >
       {iconBase64 ? <img src={iconBase64} alt="" className="w-full h-full object-cover" /> : def.fallback.glyph}
     </span>
-  );
+  )
 }
 
 function ErrorBanner({ error }: { error: ErrorState }) {
-  if (!error) return null;
-  const isAmber = error.kind === 'network';
+  if (!error) return null
+  const isAmber = error.kind === 'network'
   return (
     <div role="alert" className={['mx-6 mb-3.5 flex items-start gap-2.5 px-[13px] py-[11px] rounded-[10px] text-[13px] leading-[1.4]', isAmber ? 'bg-[var(--amber-bg)] text-[var(--amber-ink)] border border-[#ebd187]' : 'bg-[var(--rose-bg)] text-[var(--rose-ink)] border border-[#ecb5ac]'].join(' ')}>
       {error.kind === 'network' ? (
@@ -238,15 +234,15 @@ function ErrorBanner({ error }: { error: ErrorState }) {
         {error.message ? <> {error.message}</> : null}
       </span>
     </div>
-  );
+  )
 }
 
 function classifyError(e: unknown): ErrorState {
-  const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Error desconocido.';
-  const lower = msg.toLowerCase();
+  const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Error desconocido.'
+  const lower = msg.toLowerCase()
   if (lower.includes('network') || lower.includes('mainnet') || lower.includes('wrong network') || lower.includes('preview'))
-    return { kind: 'network', message: 'Cambiá tu wallet a Preview testnet y volvé a intentar.' };
+    return { kind: 'network', message: 'Cambiá tu wallet a Preview testnet y volvé a intentar.' }
   if (lower.includes('reject') || lower.includes('denied') || lower.includes('cancel') || lower.includes('user refused'))
-    return { kind: 'rejected', message: '' };
-  return { kind: 'other', message: msg };
+    return { kind: 'rejected', message: '' }
+  return { kind: 'other', message: msg }
 }

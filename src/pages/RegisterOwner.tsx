@@ -1,12 +1,10 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useWallet } from '@meshsdk/react';
+import { useLucid } from '../lib/LucidContext';
 
 import { useRegisterOwner, type RegisterOwnerFields } from '../hooks/useRegisterOwner';
 import { useOwnerRecord } from '../hooks/useOwnerRecord';
 import { WalletModal } from '../components/WalletModal';
-import { normalizeAddress } from '../lib/decoders';
-import { addressToPkh } from '../hooks/useReserveSlot';
 
 const LIMITS = { fieldName: 64, fieldAddress: 64, phone: 32, email: 64 } as const;
 const LATLONG_RE = /^-?\d+\.\d+$/;
@@ -25,17 +23,10 @@ type Step = 'form' | 'preview' | 'success';
 
 export default function RegisterOwner() {
   const navigate = useNavigate();
-  const { connected, wallet } = useWallet();
+  const { connected, pkh } = useLucid();
   const { register, loading, error } = useRegisterOwner();
 
-  const [viewerPkh, setViewerPkh] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    if (!connected || !wallet) { setViewerPkh(null); return; }
-    wallet.getChangeAddress()
-      .then(addr => setViewerPkh(addressToPkh(normalizeAddress(addr))))
-      .catch(() => setViewerPkh(null));
-  }, [connected, wallet]);
-
+  const viewerPkh = pkh || null;
   const { record: existingRecord, loading: recordLoading } = useOwnerRecord(viewerPkh);
 
   const [step, setStep] = React.useState<Step>('form');

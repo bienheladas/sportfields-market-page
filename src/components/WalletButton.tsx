@@ -1,8 +1,8 @@
 // WalletButton.tsx — botón del Navbar con 3 estados: desconectado / conectando / conectado.
 
-import * as React from 'react';
-import { useWallet } from '@meshsdk/react';
-import { WalletModal } from './WalletModal';
+import * as React from 'react'
+import { useLucid } from '../lib/LucidContext'
+import { WalletModal } from './WalletModal'
 
 const FALLBACK_BY_WALLET: Record<string, { color: string; glyph: string }> = {
   lace:   { color: '#1d3aff', glyph: '⌬' },
@@ -11,46 +11,33 @@ const FALLBACK_BY_WALLET: Record<string, { color: string; glyph: string }> = {
   yoroi:  { color: '#3154cb', glyph: '◈' },
   flint:  { color: '#ec5e29', glyph: '🔥' },
   typhon: { color: '#197cef', glyph: '⚡' },
-};
+}
 
 export function WalletButton() {
-  const { connected, connecting, disconnect, name, address } = useWallet();
-  const [modalOpen, setModalOpen] = React.useState(false);
-  const [menuOpen, setMenuOpen]   = React.useState(false);
-  const [copied, setCopied]       = React.useState(false);
-  const wrapperRef = React.useRef<HTMLDivElement>(null);
+  const { connected, disconnect, walletName, address } = useLucid()
+  const [modalOpen, setModalOpen] = React.useState(false)
+  const [menuOpen, setMenuOpen]   = React.useState(false)
+  const [copied, setCopied]       = React.useState(false)
+  const wrapperRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen) return
     const onClick = (e: MouseEvent) => {
-      if (!wrapperRef.current?.contains(e.target as Node)) setMenuOpen(false);
-    };
-    const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setMenuOpen(false);
-    document.addEventListener('mousedown', onClick);
-    document.addEventListener('keydown', onEsc);
+      if (!wrapperRef.current?.contains(e.target as Node)) setMenuOpen(false)
+    }
+    const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setMenuOpen(false)
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onEsc)
     return () => {
-      document.removeEventListener('mousedown', onClick);
-      document.removeEventListener('keydown', onEsc);
-    };
-  }, [menuOpen]);
-
-  // ── Conectando ──────────────────────────────────────────────────
-  if (connecting && !connected) {
-    return (
-      <>
-        <button disabled className="inline-flex items-center gap-2 px-4 py-2 rounded-full border-[1.5px] border-[var(--line-strong)] bg-[var(--paper)] text-[var(--ink-2)] text-[14px] font-medium cursor-not-allowed">
-          <Spinner />
-          Conectando…
-        </button>
-        <WalletModal open={modalOpen} onClose={() => setModalOpen(false)} />
-      </>
-    );
-  }
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [menuOpen])
 
   // ── Conectado ───────────────────────────────────────────────────
   if (connected) {
-    const walletKey = (name ?? '').toLowerCase();
-    const fb = FALLBACK_BY_WALLET[walletKey] ?? { color: '#1a1a17', glyph: '◉' };
+    const walletKey = walletName.toLowerCase()
+    const fb = FALLBACK_BY_WALLET[walletKey] ?? { color: '#1a1a17', glyph: '◉' }
 
     return (
       <div ref={wrapperRef} className="relative">
@@ -83,7 +70,7 @@ export function WalletButton() {
           <div role="menu" className="absolute top-[calc(100%+8px)] right-0 z-30 min-w-[240px] p-1.5 bg-[var(--paper)] border border-[var(--line-strong)] rounded-xl shadow-[0_1px_2px_rgba(20,16,8,.04),0_6px_18px_rgba(20,16,8,.06)]">
             <div className="px-3 pt-2.5 pb-1.5 flex flex-col gap-0.5">
               <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted)] font-semibold">
-                Conectado con {capitalize(name ?? walletKey)}
+                Conectado con {capitalize(walletName)}
               </span>
               <span className="font-mono text-[11px] text-[var(--ink-2)] break-all leading-[1.35]">{address}</span>
             </div>
@@ -93,11 +80,11 @@ export function WalletButton() {
               type="button"
               role="menuitem"
               onClick={async () => {
-                if (!address) return;
+                if (!address) return
                 try {
-                  await navigator.clipboard.writeText(address);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1200);
+                  await navigator.clipboard.writeText(address)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 1200)
                 } catch { /* ignore */ }
               }}
               className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13px] font-medium text-[var(--ink)] hover:bg-[var(--paper-2)] text-left"
@@ -109,7 +96,7 @@ export function WalletButton() {
             <button
               type="button"
               role="menuitem"
-              onClick={() => { disconnect(); setMenuOpen(false); }}
+              onClick={() => { disconnect(); setMenuOpen(false) }}
               className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13px] font-medium text-[var(--rose-ink)] hover:bg-[var(--rose-bg)] text-left"
             >
               <DisconnectIcon />
@@ -118,7 +105,7 @@ export function WalletButton() {
           </div>
         )}
       </div>
-    );
+    )
   }
 
   // ── Desconectado ────────────────────────────────────────────────
@@ -137,16 +124,7 @@ export function WalletButton() {
       </button>
       <WalletModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </>
-  );
-}
-
-function Spinner() {
-  return (
-    <>
-      <style>{`@keyframes wb-spin { to { transform: rotate(360deg); } }`}</style>
-      <span className="inline-block w-[14px] h-[14px] rounded-full border-[1.5px] border-[var(--line-strong)] border-t-[var(--accent)]" style={{ animation: 'wb-spin .8s linear infinite' }} />
-    </>
-  );
+  )
 }
 
 function CopyIcon() {
@@ -155,7 +133,7 @@ function CopyIcon() {
       <rect x="4" y="4" width="9" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
       <path d="M11 4V3a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1" stroke="currentColor" strokeWidth="1.4" />
     </svg>
-  );
+  )
 }
 
 function DisconnectIcon() {
@@ -163,15 +141,15 @@ function DisconnectIcon() {
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <path d="M9 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5M11 5l3 3-3 3M14 8H7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
-  );
+  )
 }
 
-function shortAddr(addr: string | undefined): string {
-  if (!addr) return '';
-  if (addr.length <= 14) return addr;
-  return `${addr.slice(0, 9)}…${addr.slice(-4)}`;
+function shortAddr(addr: string): string {
+  if (!addr) return ''
+  if (addr.length <= 14) return addr
+  return `${addr.slice(0, 9)}…${addr.slice(-4)}`
 }
 
 function capitalize(s: string): string {
-  return s ? s[0].toUpperCase() + s.slice(1) : s;
+  return s ? s[0].toUpperCase() + s.slice(1) : s
 }

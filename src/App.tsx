@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import { MeshProvider } from '@meshsdk/react'
+import { LucidProvider } from './lib/LucidContext'
 import { Navbar } from './components/Navbar'
 import FieldDiscovery from './pages/FieldDiscovery'
 import FieldDetail from './pages/FieldDetail'
@@ -10,7 +10,7 @@ import RegisterOwner from './pages/RegisterOwner'
 
 export default function App() {
   return (
-    <MeshProvider>
+    <LucidProvider>
       <BrowserRouter>
         <div className="min-h-screen bg-[var(--paper)]">
           <Navbar />
@@ -23,6 +23,6 @@ export default function App() {
           </Routes>
         </div>
       </BrowserRouter>
-    </MeshProvider>
+    </LucidProvider>
   )
 }
