@@ -278,9 +278,9 @@ function OwnerCta({ onClick }: { onClick: () => void }) {
         </svg>
       </div>
       <div className="flex-1 min-w-[240px]">
-        <h3 className="m-0 mb-1 text-base font-semibold">¿Tenés una cancha? Cobrá en ADA por cada hora reservada.</h3>
+        <h3 className="m-0 mb-1 text-base font-semibold">¿Tienes una cancha? Cobra en ADA por cada hora reservada.</h3>
         <p className="m-0 text-[13px] text-[var(--muted)] leading-[1.5]">
-          Registrá tu cancha una vez, fijá tus precios y recibí los pagos directo a tu wallet. Comisión 1%.
+          Registra tu cancha una vez, fija tus precios y recibe los pagos directo a tu wallet. Comisión 1%.
         </p>
       </div>
       <button
@@ -288,7 +288,7 @@ function OwnerCta({ onClick }: { onClick: () => void }) {
         onClick={onClick}
         className="px-[18px] py-2.5 rounded-[10px] bg-[var(--ink)] hover:bg-[var(--ink-2)] text-[var(--paper)] font-semibold text-[13px]"
       >
-        Registrá tu cancha →
+        Registra tu cancha →
       </button>
     </div>
   );

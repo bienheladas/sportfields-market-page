@@ -23,7 +23,7 @@ export default function MyBookings() {
 
   if (!connected) return (
     <div className="max-w-xl mx-auto px-4 py-16 text-center">
-      <p className="text-[var(--muted)] mb-4">Conectá tu wallet para ver tus reservas.</p>
+      <p className="text-[var(--muted)] mb-4">Conecta tu wallet para ver tus reservas.</p>
     </div>
   )
 

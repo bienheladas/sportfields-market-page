@@ -66,7 +66,7 @@ export function useRegisterOwner(): UseRegisterOwner {
 
   const register = React.useCallback(
     async (fields: RegisterOwnerFields): Promise<string> => {
-      if (!lucid) throw new Error('Conectá tu wallet para registrar tu cancha.')
+      if (!lucid) throw new Error('Conecta tu wallet para registrar tu cancha.')
 
       const validationError = validate(fields)
       if (validationError) throw new Error(validationError)
