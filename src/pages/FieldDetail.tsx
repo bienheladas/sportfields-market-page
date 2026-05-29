@@ -424,7 +424,7 @@ function PriceCard({
             <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.4" />
             <path d="M8 4.5v4M8 11h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
-          <span>Tenés una reserva activa</span>
+          <span>Tienes una reserva activa</span>
           <a
             href={`#slot-${myActiveSlot.datum.slotId}`}
             className="ml-auto font-semibold no-underline border-b border-dashed border-[var(--accent-deep,#d44a2f)]"

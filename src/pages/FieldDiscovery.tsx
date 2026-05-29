@@ -85,7 +85,7 @@ export default function FieldDiscovery() {
         </span>
 
         <h1 className="m-0 mb-[18px] text-[clamp(40px,5.6vw,64px)] leading-[1.02] tracking-[-0.028em] font-bold max-w-[820px] text-balance">
-          Reservá tu{' '}
+          Reserva tu{' '}
           <span className="text-[var(--accent)] whitespace-nowrap">cancha deportiva</span>.
         </h1>
 
@@ -244,7 +244,7 @@ function EmptyState({ hasActiveFilter, onClear }: { hasActiveFilter: boolean; on
       </h3>
       <p className="m-0 mx-auto mb-5 text-sm text-[var(--muted)] max-w-[380px] leading-[1.5]">
         {hasActiveFilter
-          ? 'Probá con otro día o franja horaria, o limpiá los filtros para ver todas las canchas.'
+          ? 'Prueba con otro día o franja horaria, o limpia los filtros para ver todas las canchas.'
           : 'Sé el primero en registrar tu cancha en Sportfields.'}
       </p>
       {hasActiveFilter && (
@@ -278,9 +278,9 @@ function OwnerCta({ onClick }: { onClick: () => void }) {
         </svg>
       </div>
       <div className="flex-1 min-w-[240px]">
-        <h3 className="m-0 mb-1 text-base font-semibold">¿Tenés una cancha? Cobrá en ADA por cada hora reservada.</h3>
+        <h3 className="m-0 mb-1 text-base font-semibold">¿Tienes una cancha? Cobra en ADA por cada hora reservada.</h3>
         <p className="m-0 text-[13px] text-[var(--muted)] leading-[1.5]">
-          Registrá tu cancha una vez, fijá tus precios y recibí los pagos directo a tu wallet. Comisión 1%.
+          Registra tu cancha una vez, fija tus precios y recibe los pagos directo a tu wallet. Comisión 1%.
         </p>
       </div>
       <button
@@ -288,7 +288,7 @@ function OwnerCta({ onClick }: { onClick: () => void }) {
         onClick={onClick}
         className="px-[18px] py-2.5 rounded-[10px] bg-[var(--ink)] hover:bg-[var(--ink-2)] text-[var(--paper)] font-semibold text-[13px]"
       >
-        Registrá tu cancha →
+        Registra tu cancha →
       </button>
     </div>
   );

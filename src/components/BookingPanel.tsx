@@ -228,7 +228,7 @@ function AvailableBody({ d }: { d: RentSlotUtxoLike['datum'] }) {
 
       <Section title="Política de cancelación">
         <NoteBox>
-          Podés cancelar hasta el <strong>{cancelLabel}</strong>. La cancelación devuelve{' '}
+          Puedes cancelar hasta el <strong>{cancelLabel}</strong>. La cancelación devuelve{' '}
           <strong>{refundOnCancel.toFixed(2)} ₳</strong> (descuento de {cancelPenalty} ₳ por penalidad on-chain).
         </NoteBox>
       </Section>
@@ -278,7 +278,7 @@ function NonAvailableBody({
           </NoteBox>
         ) : isCustomer && (d.status === 'Confirmed' || d.status === 'Pending') ? (
           <NoteBox tone="amber">
-            Podés cancelar hasta el <strong>{cancelLabel}</strong>. Recibirás{' '}
+            Puedes cancelar hasta el <strong>{cancelLabel}</strong>. Recibirás{' '}
             <strong>{refundOnCancel.toFixed(2)} ₳</strong> de vuelta (descuento de {cancelPenalty} ₳ por penalidad on-chain).
           </NoteBox>
         ) : (

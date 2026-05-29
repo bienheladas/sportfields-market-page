@@ -20,7 +20,7 @@ export default function OwnerPanel() {
 
   if (!connected) return (
     <div className="max-w-xl mx-auto px-4 py-16 text-center">
-      <p className="text-[var(--muted)]">Conectá tu wallet para ver tu panel de propietario.</p>
+      <p className="text-[var(--muted)]">Conecta tu wallet para ver tu panel de propietario.</p>
     </div>
   )
 
