@@ -86,7 +86,7 @@ export default function FieldDiscovery() {
 
         <h1 className="m-0 mb-[18px] text-[clamp(40px,5.6vw,64px)] leading-[1.02] tracking-[-0.028em] font-bold max-w-[820px] text-balance">
           Reserva tu{' '}
-          <span className="text-[var(--accent)] whitespace-nowrap">cancha deportiva</span>.
+          <span className="text-[var(--accent)] whitespace-nowrap">cancha deportiva</span>
         </h1>
 
         <p className="m-0 mb-8 text-[17px] leading-[1.55] text-[var(--muted)] max-w-[560px]">
