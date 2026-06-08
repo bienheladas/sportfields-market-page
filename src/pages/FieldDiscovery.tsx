@@ -25,7 +25,7 @@ function slotMatchesFilter(slotId: number, filter: SlotFilter): boolean {
 }
 
 export function groupBySummary(slots: RentDatum[], heads: ListHeadDatum[], filter: SlotFilter): FieldSummary[] {
-  // Build set of taken slot IDs per owner
+  // Build set of taken slot IDs per owner+week
   const takenByOwner = new Map<string, Set<number>>();
   for (const s of slots) {
     let set = takenByOwner.get(s.ownerNFTName);
@@ -49,6 +49,7 @@ export function groupBySummary(slots: RentDatum[], heads: ListHeadDatum[], filte
       long: h.long,
       rentPrice: h.config.rentPrice,
       slotsAvailable,
+      weekStartPosix: h.config.weekStartPosix,
     };
   }).sort((a, b) => {
     if (b.slotsAvailable !== a.slotsAvailable) return b.slotsAvailable - a.slotsAvailable;
@@ -76,8 +77,10 @@ export default function FieldDiscovery() {
   const totalAvailable = fields.reduce((s, f) => s + f.slotsAvailable, 0);
   const visibleAvailable = visible.reduce((s, f) => s + f.slotsAvailable, 0);
 
-  const goToField = (ownerNFTName: string, fieldName: string) =>
-    navigate(`/field/${ownerNFTName}?fn=${fieldName}`);
+  const goToField = (ownerNFTName: string, fieldName: string, weekStartPosix?: number) => {
+    const ws = weekStartPosix != null ? `&ws=${weekStartPosix}` : '';
+    navigate(`/field/${ownerNFTName}?fn=${fieldName}${ws}`);
+  };
   const gridRef = React.useRef<HTMLDivElement>(null);
   const scrollToGrid = () => gridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -116,7 +119,7 @@ export default function FieldDiscovery() {
         ) : (
           <div className="grid grid-cols-3 max-lg:grid-cols-2 max-sm:grid-cols-1 gap-[22px] max-lg:gap-[18px]">
             {visible.map((f) => (
-              <FieldCard key={f.ownerNFTName + f.fieldName} field={f} onOpen={goToField} />
+              <FieldCard key={f.ownerNFTName + f.fieldName + (f.weekStartPosix ?? '')} field={f} onOpen={goToField} />
             ))}
           </div>
         )}

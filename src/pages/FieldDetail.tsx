@@ -39,6 +39,7 @@ export default function FieldDetail() {
   const { ownerNFT = '' } = useParams<{ ownerNFT: string }>();
   const [searchParams] = useSearchParams();
   const fieldNameFilter = searchParams.get('fn');
+  const weekStartParam  = searchParams.get('ws') ? Number(searchParams.get('ws')) : null;
   const navigate = useNavigate();
   const { connected, pkh: viewerPkh } = useLucid();
 
@@ -54,9 +55,13 @@ export default function FieldDetail() {
 
   const [weekIdx, setWeekIdx] = React.useState(0);
 
-  // Al cargar, saltar a la semana que contiene "ahora" (o la última)
+  // Al cargar, saltar a la semana indicada por URL (?ws=), o la que contiene "ahora", o la última
   React.useEffect(() => {
     if (sortedHeads.length === 0) return;
+    if (weekStartParam != null) {
+      const idx = sortedHeads.findIndex(h => h.datum.config.weekStartPosix === weekStartParam);
+      if (idx >= 0) { setWeekIdx(idx); return; }
+    }
     const nowMs = Date.now();
     const idx = sortedHeads.findIndex(h => {
       const ws = h.datum.config.weekStartPosix;

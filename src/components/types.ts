@@ -224,7 +224,7 @@ export type RentMintingRedeemer =
 // UI-only: FieldDiscovery
 // ───────────────────────────────────────────────────────────────────
 
-/** Aggregated view of one field (grouped by ownerNFTName) for FieldDiscovery cards. */
+/** Aggregated view of one field week for FieldDiscovery cards. */
 export interface FieldSummary {
   ownerNFTName: TokenName
   fieldName: BBS
@@ -236,4 +236,6 @@ export interface FieldSummary {
   rentPrice: Lovelace
   /** Available slots matching the active SlotFilter. */
   slotsAvailable: number
+  /** weekStartPosix of this week's ListHead — used to open the correct week in FieldDetail. */
+  weekStartPosix?: number
 }
