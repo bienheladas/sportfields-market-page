@@ -1,5 +1,6 @@
 import * as React from 'react'
 import type { OwnerRecord } from './types'
+import type { ListHeadUtxo } from '../hooks/useRentSlots'
 import { useInitWeek, type DaySchedule, type InitWeekParams } from '../hooks/useInitWeek'
 import { decodeBBS } from './lib'
 
@@ -26,6 +27,15 @@ function nextMonday(): string {
   return d.toISOString().slice(0, 10)
 }
 
+function getISOWeekLabel(posixMs: number): string {
+  const d   = new Date(posixMs)
+  const tmp = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay() || 7))
+  const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1))
+  const week = Math.ceil((((tmp.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7)
+  return `Sem. ${week}/${tmp.getUTCFullYear()}`
+}
+
 function slotCount(s: DaySchedule[]): number {
   return s.reduce((n, d) => n + (d.enabled && d.close > d.open ? d.close - d.open : 0), 0)
 }
@@ -38,6 +48,7 @@ function totalAdaNeeded(slots: number): number {
 
 export interface InitWeekModalProps {
   record: OwnerRecord
+  existingHeads: ListHeadUtxo[]
   open: boolean
   onClose: () => void
   onDone: (txHashes: string[]) => void
@@ -47,7 +58,7 @@ export interface InitWeekModalProps {
 
 type Step = 'form' | 'confirm' | 'submitting' | 'done'
 
-export function InitWeekModal({ record, open, onClose, onDone }: InitWeekModalProps) {
+export function InitWeekModal({ record, existingHeads, open, onClose, onDone }: InitWeekModalProps) {
   const { initWeek, loading, error } = useInitWeek()
 
   const [step, setStep]           = React.useState<Step>('form')
@@ -82,6 +93,13 @@ export function InitWeekModal({ record, open, onClose, onDone }: InitWeekModalPr
     const e = validateDate(weekDate)
     setDateErr(e)
     if (e || !priceOk || slots === 0) return
+    const weekStartMs = new Date(weekDate + 'T00:00:00Z').getTime()
+    const duplicate = existingHeads.some(h => h.datum.config.weekStartPosix === weekStartMs)
+    if (duplicate) {
+      const label = getISOWeekLabel(weekStartMs)
+      setDateErr(`Ya existe una semana programada para ${label}. Elegí otra fecha.`)
+      return
+    }
     setStep('confirm')
   }
 
@@ -157,6 +175,7 @@ export function InitWeekModal({ record, open, onClose, onDone }: InitWeekModalPr
         {step === 'confirm' && (
           <ConfirmBody
             weekDate={weekDate}
+            isoWeekLabel={getISOWeekLabel(new Date(weekDate + 'T00:00:00Z').getTime())}
             priceAda={priceNum}
             cancelH={cancelNum}
             schedule={schedule}
@@ -211,6 +230,12 @@ function FormBody({
             onChange={e => setWeekDate(e.target.value)}
             className={inputCls(!!dateErr)}
           />
+          {!dateErr && weekDate && (() => {
+            const ms = new Date(weekDate + 'T00:00:00Z').getTime()
+            return !isNaN(ms)
+              ? <span className="text-[11px] text-[var(--muted)] mt-0.5">{getISOWeekLabel(ms)}</span>
+              : null
+          })()}
         </Field>
         <Field label="Precio por slot (ADA)">
           <input
@@ -332,9 +357,9 @@ function FormBody({
 // ── Confirm step ───────────────────────────────────────────────────
 
 function ConfirmBody({
-  weekDate, priceAda, cancelH, schedule, slots, totalAda, error, onBack, onSubmit,
+  weekDate, isoWeekLabel, priceAda, cancelH, schedule, slots, totalAda, error, onBack, onSubmit,
 }: {
-  weekDate: string; priceAda: number; cancelH: number
+  weekDate: string; isoWeekLabel: string; priceAda: number; cancelH: number
   schedule: DaySchedule[]; slots: number; totalAda: number
   error: string | null; onBack: () => void; onSubmit: () => void
 }) {
@@ -344,7 +369,7 @@ function ConfirmBody({
       <div className="bg-[var(--paper-2)] border border-[var(--line)] rounded-[10px] overflow-hidden">
         <table className="w-full text-[13px]">
           <tbody>
-            <SummaryRow k="Semana" v={weekDate} />
+            <SummaryRow k="Semana" v={`${weekDate} · ${isoWeekLabel}`} />
             <SummaryRow k="Precio/slot" v={`${priceAda} ₳`} mono />
             <SummaryRow k="Cancelación" v={`hasta ${cancelH}h antes`} />
             <SummaryRow k="Comisión plataforma" v="1%" />

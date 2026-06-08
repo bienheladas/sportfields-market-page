@@ -238,4 +238,6 @@ export interface FieldSummary {
   slotsAvailable: number
   /** weekStartPosix of this week's ListHead — used to open the correct week in FieldDetail. */
   weekStartPosix?: number
+  /** txHash of the ListHead UTxO — unique key for React rendering. */
+  headTxHash?: string
 }

@@ -139,23 +139,24 @@ export default function OwnerPanel() {
   )
 
   const record = selectedField.record
-  const completedSlots = slots.filter(s => s.datum.status === 'Completed')
+  const completedSlots = slots.filter(s => s.datum.status === 'Completed' && s.datum.fieldName === record.fieldName)
 
-  // Filter heads to this field: prefer ownerNFTName match (new format),
-  // fall back to fieldName match (old format where init-week.mjs used ownerPkh as name)
+  // Filter heads to this specific field (ownerNFTName + fieldName) so that
+  // multiple fields registered under the same owner don't bleed into each other.
   const fieldHeads = heads.filter(h =>
-    h.datum.ownerNFTName === selectedField.ownerNFTName ||
+    h.datum.ownerNFTName === selectedField.ownerNFTName &&
     h.datum.fieldName === record.fieldName
   )
 
   const weeks: WeekView[] = fieldHeads
     .map(h => {
       const weekEnd = h.datum.config.weekStartPosix + WEEK_MS
-      return { head: h, weekEnd, slots: slots.filter(s => s.datum.weekEnd === weekEnd) }
+      return { head: h, weekEnd, slots: slots.filter(s => s.datum.weekEnd === weekEnd && s.datum.fieldName === h.datum.fieldName) }
     })
     .sort((a, b) => a.head.datum.config.weekStartPosix - b.head.datum.config.weekStartPosix)
 
   const orphanSlots = slots.filter(s =>
+    s.datum.fieldName === record.fieldName &&
     !fieldHeads.some(h => h.datum.config.weekStartPosix + WEEK_MS === s.datum.weekEnd)
   )
 
@@ -308,6 +309,7 @@ export default function OwnerPanel() {
       {record && (
         <InitWeekModal
           record={record}
+          existingHeads={fieldHeads}
           open={initWeekOpen}
           onClose={() => setInitWeekOpen(false)}
           onDone={() => setInitWeekOpen(false)}

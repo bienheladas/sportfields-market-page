@@ -6,6 +6,7 @@ import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { RentDatum, ListHeadDatum, FieldSummary } from '../components/types';
 import { useRentSlots } from '../hooks/useRentSlots';
+import type { ListHeadUtxo } from '../hooks/useRentSlots';
 import { decodeBBS, slotIdToCoord } from '../components/lib';
 import { SlotFilterBar, type SlotFilter, type DayKey } from '../components/SlotFilterBar';
 import { FieldCard } from '../components/FieldCard';
@@ -24,8 +25,16 @@ function slotMatchesFilter(slotId: number, filter: SlotFilter): boolean {
   return true;
 }
 
-export function groupBySummary(slots: RentDatum[], heads: ListHeadDatum[], filter: SlotFilter): FieldSummary[] {
-  // Build set of taken slot IDs per owner+week
+export function groupBySummary(slots: RentDatum[], headUtxos: ListHeadUtxo[], filter: SlotFilter): FieldSummary[] {
+  // Deduplicate heads by txHash (protects against double init-week runs)
+  const seen = new Set<string>();
+  const heads = headUtxos.filter(u => {
+    if (seen.has(u.txHash)) return false;
+    seen.add(u.txHash);
+    return true;
+  });
+
+  // Build set of taken slot IDs per owner (across all weeks — for the card count)
   const takenByOwner = new Map<string, Set<number>>();
   for (const s of slots) {
     let set = takenByOwner.get(s.ownerNFTName);
@@ -34,7 +43,8 @@ export function groupBySummary(slots: RentDatum[], heads: ListHeadDatum[], filte
   }
 
   // One entry per ListHead (one active week per owner)
-  return heads.map(h => {
+  return heads.map(u => {
+    const h = u.datum;
     const taken = takenByOwner.get(h.ownerNFTName) ?? new Set<number>();
     const slotsAvailable = h.config.openSlotIds.filter(
       id => !taken.has(id) && slotMatchesFilter(id, filter)
@@ -50,6 +60,7 @@ export function groupBySummary(slots: RentDatum[], heads: ListHeadDatum[], filte
       rentPrice: h.config.rentPrice,
       slotsAvailable,
       weekStartPosix: h.config.weekStartPosix,
+      headTxHash: u.txHash,
     };
   }).sort((a, b) => {
     if (b.slotsAvailable !== a.slotsAvailable) return b.slotsAvailable - a.slotsAvailable;
@@ -63,13 +74,12 @@ export default function FieldDiscovery() {
   const navigate = useNavigate();
   const { slots: utxos, heads: headUtxos, loading, error } = useRentSlots();
 
-  const datums     = React.useMemo(() => utxos.map(u => u.datum), [utxos]);
-  const headDatums = React.useMemo(() => headUtxos.map(h => h.datum), [headUtxos]);
+  const datums = React.useMemo(() => utxos.map(u => u.datum), [utxos]);
   const [filter, setFilter] = React.useState<SlotFilter>({ day: null, hour: null });
 
   const fields = React.useMemo<FieldSummary[]>(
-    () => groupBySummary(datums, headDatums, filter),
-    [datums, headDatums, filter],
+    () => groupBySummary(datums, headUtxos, filter),
+    [datums, headUtxos, filter],
   );
 
   const hasActiveFilter = filter.day != null || filter.hour != null;
@@ -119,7 +129,7 @@ export default function FieldDiscovery() {
         ) : (
           <div className="grid grid-cols-3 max-lg:grid-cols-2 max-sm:grid-cols-1 gap-[22px] max-lg:gap-[18px]">
             {visible.map((f) => (
-              <FieldCard key={f.ownerNFTName + f.fieldName + (f.weekStartPosix ?? '')} field={f} onOpen={goToField} />
+              <FieldCard key={f.headTxHash ?? f.ownerNFTName + (f.weekStartPosix ?? '')} field={f} onOpen={goToField} />
             ))}
           </div>
         )}

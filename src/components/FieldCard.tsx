@@ -49,6 +49,13 @@ export function FieldCard({ field, onOpen, compact = false, className = '' }: Fi
           <span>{decodeBBS(field.fieldAddress)}</span>
         </div>
 
+        {field.weekStartPosix != null && (
+          <div className="flex items-center gap-1.5 text-[12px] text-[var(--muted)]">
+            <CalIcon />
+            <span className="font-medium">{weekRangeLabel(field.weekStartPosix)}</span>
+          </div>
+        )}
+
         <div className="h-px bg-[var(--line)] my-1" />
 
         <div className="flex items-center justify-between gap-3">
@@ -167,11 +174,26 @@ function SlotsPill({ count }: { count: number }) {
   );
 }
 
+function weekRangeLabel(weekStartPosix: number): string {
+  const fmt = (ts: number) =>
+    new Date(ts).toLocaleDateString('es-PE', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+  return `${fmt(weekStartPosix)} – ${fmt(weekStartPosix + 6 * 24 * 3_600_000)}`
+}
+
 function PinIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className="mt-[2px] shrink-0 text-[var(--muted)]" aria-hidden="true">
       <path d="M8 14s4.5-4 4.5-7.5a4.5 4.5 0 0 0-9 0C3.5 10 8 14 8 14z" stroke="currentColor" strokeWidth="1.3" />
       <circle cx="8" cy="6.5" r="1.6" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function CalIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="shrink-0" aria-hidden="true">
+      <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M5 2v3M11 2v3M2.5 7h11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   );
 }

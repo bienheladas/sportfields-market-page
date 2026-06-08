@@ -68,7 +68,7 @@ export default function FieldDetail() {
       return nowMs >= ws && nowMs < ws + 7 * 24 * 3_600_000;
     });
     setWeekIdx(idx >= 0 ? idx : sortedHeads.length - 1);
-  }, [sortedHeads.length]);
+  }, [sortedHeads.length, weekStartParam]);
 
   const head = sortedHeads[weekIdx] ?? null;
 
@@ -76,7 +76,7 @@ export default function FieldDetail() {
   const weekSlots = React.useMemo(() => {
     if (!head) return slots;
     const weekEnd = head.datum.config.weekStartPosix + 7 * 24 * 3_600_000;
-    return slots.filter(s => s.datum.weekEnd === weekEnd);
+    return slots.filter(s => s.datum.weekEnd === weekEnd && s.datum.fieldName === head.datum.fieldName);
   }, [slots, head]);
 
   const ownerPkh = head?.datum.ownerPkh ?? slots?.[0]?.datum.ownerPkh ?? '';
