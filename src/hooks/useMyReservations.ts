@@ -22,7 +22,8 @@ export function useMyReservations(customerPkh: string | null) {
         for (const u of utxos) {
           if (!u.inline_datum) continue
           try {
-            const datum: RentDatum = decodeRentDatum(u.inline_datum)
+            const datum: RentDatum | null = decodeRentDatum(u.inline_datum)
+            if (!datum) continue  // Head datum — skip
             if (datum.customerPkh !== customerPkh) continue
             if (!CUSTOMER_STATUSES.includes(datum.status)) continue
             const lovelace = BigInt(u.amount.find(a => a.unit === 'lovelace')?.quantity ?? '0')

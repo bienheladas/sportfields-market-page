@@ -1,7 +1,7 @@
 // CBOR → TS type decoders for on-chain datums.
 // Uses the same cbor tag conventions as plutus-cbor.mjs.
 
-import type { RentDatum, OwnerRecord, CompanyConfig, OwnersDatum, SlotStatus } from '../components/types'
+import type { RentDatum, OwnerRecord, CompanyConfig, OwnersDatum, SlotStatus, NodeKey, WeekConfig, ListHeadDatum } from '../components/types'
 import { SLOT_STATUS_BY_TAG } from '../components/types'
 import { bech32 } from 'bech32'
 
@@ -172,31 +172,83 @@ function decodeMaybe<T>(v: CborValue, decoder: (v: CborValue) => T): T | null {
   throw new Error(`Expected Maybe tag 121/122, got ${t.tag}`)
 }
 
-export function decodeRentDatum(hex: string): RentDatum {
-  const outer = asTag(readCborHex(hex), 121)  // Constr 0
-  const fields = asArray(outer.value)
+function decodeNodeKey(v: CborValue): NodeKey {
+  const t = asTag(v)
+  if (t.tag === 121) return { tag: 'Key', key: Number(asInt(asArray(t.value)[0])) }
+  if (t.tag === 122) return { tag: 'Empty' }
+  throw new Error(`Unknown NodeKey tag ${t.tag}`)
+}
 
+function decodeWeekConfig(v: CborValue): WeekConfig {
+  const t = asTag(v, 121)  // Constr 0
+  const f = asArray(t.value)
+  const idsRaw = f[5]
+  const openSlotIds = Array.isArray(idsRaw)
+    ? (idsRaw as CborValue[]).map(x => Number(asInt(x)))
+    : []
   return {
-    slotId:           Number(asInt(fields[0])),
-    slotStart:        Number(asInt(fields[1])),
-    slotEnd:          Number(asInt(fields[2])),
-    cancelDeadline:   Number(asInt(fields[3])),
-    rentPrice:        asInt(fields[4]),
+    weekStartPosix:            Number(asInt(f[0])),
+    slotDurationMs:            Number(asInt(f[1])),
+    cancelDeadlineOffsetMs:    Number(asInt(f[2])),
+    rentPrice:                 asInt(f[3]),
+    siteCommissionBps:         Number(asInt(f[4])),
+    openSlotIds,
+    loyaltyNftsRequired:       Number(asInt(f[6])),
+  }
+}
+
+export function decodeListHeadDatum(hex: string): ListHeadDatum {
+  const outer = asTag(readCborHex(hex), 121)  // SlotDatum::Head = Constr 0
+  const inner = asTag(asArray(outer.value)[0], 121)  // ListHead = Constr 0
+  const f = asArray(inner.value)  // 12 fields
+  return {
+    ownerNFTName:    bytesToHex(asBytes(f[0])),
+    ownerPkh:        bytesToHex(asBytes(f[1])),
+    companyPkh:      bytesToHex(asBytes(f[2])),
+    fieldName:       bytesToHex(asBytes(f[3])),
+    fieldAddress:    bytesToHex(asBytes(f[4])),
+    phone:           bytesToHex(asBytes(f[5])),
+    email:           bytesToHex(asBytes(f[6])),
+    lat:             bytesToHex(asBytes(f[7])),
+    long:            bytesToHex(asBytes(f[8])),
+    paymentAddress:  bytesToHex(asBytes(f[9])),
+    config:          decodeWeekConfig(f[10]),
+    next:            decodeNodeKey(f[11]),
+  }
+}
+
+// Returns null for Head datums (SlotDatum::Head = Constr 0 / tag 121).
+// Returns RentDatum for Node datums (SlotDatum::Node = Constr 1 / tag 122).
+export function decodeRentDatum(hex: string): RentDatum | null {
+  const outer = asTag(readCborHex(hex))
+  if (outer.tag === 121) return null  // Head — not a slot node
+  if (outer.tag !== 122) throw new Error(`Expected Node (tag 122), got tag ${outer.tag}`)
+  const inner = asTag(asArray(outer.value)[0], 121)  // RentDatum = Constr 0
+  const fields = asArray(inner.value)  // 23 fields
+  return {
+    slotId:            Number(asInt(fields[0])),
+    slotStart:         Number(asInt(fields[1])),
+    slotEnd:           Number(asInt(fields[2])),
+    cancelDeadline:    Number(asInt(fields[3])),
+    rentPrice:         asInt(fields[4]),
     siteCommissionBps: Number(asInt(fields[5])),
-    ownerNFTName:     bytesToHex(asBytes(fields[6])),
-    ownerPkh:         bytesToHex(asBytes(fields[7])),
-    companyPkh:       bytesToHex(asBytes(fields[8])),
-    status:           decodeSlotStatus(fields[9]),
-    customerPkh:      decodeMaybe(fields[10], v => bytesToHex(asBytes(v))),
-    rentNFTName:      decodeMaybe(fields[11], v => bytesToHex(asBytes(v))),
-    disputeDeposit:   decodeMaybe(fields[12], v => asInt(v)),
-    fieldName:        bytesToHex(asBytes(fields[13])),
-    fieldAddress:     bytesToHex(asBytes(fields[14])),
-    phone:            bytesToHex(asBytes(fields[15])),
-    email:            bytesToHex(asBytes(fields[16])),
-    lat:              bytesToHex(asBytes(fields[17])),
-    long:             bytesToHex(asBytes(fields[18])),
-    paymentAddress:   bytesToHex(asBytes(fields[19])),
+    ownerNFTName:      bytesToHex(asBytes(fields[6])),
+    ownerPkh:          bytesToHex(asBytes(fields[7])),
+    companyPkh:        bytesToHex(asBytes(fields[8])),
+    status:            decodeSlotStatus(fields[9]),
+    customerPkh:       decodeMaybe(fields[10], v => bytesToHex(asBytes(v))),
+    rentNFTName:       decodeMaybe(fields[11], v => bytesToHex(asBytes(v))),
+    disputeDeposit:    decodeMaybe(fields[12], v => asInt(v)),
+    fieldName:         bytesToHex(asBytes(fields[13])),
+    fieldAddress:      bytesToHex(asBytes(fields[14])),
+    phone:             bytesToHex(asBytes(fields[15])),
+    email:             bytesToHex(asBytes(fields[16])),
+    lat:               bytesToHex(asBytes(fields[17])),
+    long:              bytesToHex(asBytes(fields[18])),
+    paymentAddress:    bytesToHex(asBytes(fields[19])),
+    next:                decodeNodeKey(fields[20]),
+    weekEnd:             Number(asInt(fields[21])),
+    loyaltyNftsRequired: Number(asInt(fields[22])),
   }
 }
 
@@ -236,6 +288,7 @@ export function decodeOwnersDatum(hex: string): OwnersDatum {
       lat:               bytesToHex(asBytes(f[10])),
       long:              bytesToHex(asBytes(f[11])),
       paymentAddress:    bytesToHex(asBytes(f[12])),
+      guaranteePerSlot:  asInt(f[13]),
     }
     return { kind: 'Owner', record }
   }

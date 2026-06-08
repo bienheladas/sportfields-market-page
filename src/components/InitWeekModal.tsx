@@ -48,7 +48,7 @@ export interface InitWeekModalProps {
 type Step = 'form' | 'confirm' | 'submitting' | 'done'
 
 export function InitWeekModal({ record, open, onClose, onDone }: InitWeekModalProps) {
-  const { initWeek, loading, error, progress } = useInitWeek()
+  const { initWeek, loading, error } = useInitWeek()
 
   const [step, setStep]           = React.useState<Step>('form')
   const [weekDate, setWeekDate]   = React.useState(nextMonday)
@@ -168,8 +168,8 @@ export function InitWeekModal({ record, open, onClose, onDone }: InitWeekModalPr
           />
         )}
 
-        {step === 'submitting' && progress && (
-          <SubmittingBody progress={progress} />
+        {step === 'submitting' && (
+          <SubmittingBody />
         )}
 
         {step === 'done' && (
@@ -385,27 +385,14 @@ function ConfirmBody({
 
 // ── Submitting step ────────────────────────────────────────────────
 
-function SubmittingBody({ progress }: { progress: { totalSlots: number; batchCount: number; currentBatch: number; txHashes: string[] } }) {
-  const pct = progress.batchCount > 0 ? (progress.currentBatch - 1) / progress.batchCount * 100 : 0
+function SubmittingBody() {
   return (
     <div className="px-6 py-8 flex flex-col items-center gap-5">
       <Spinner />
       <div className="text-center">
-        <p className="font-semibold text-[15px]">
-          Enviando lote {progress.currentBatch} / {progress.batchCount}
-        </p>
-        <p className="text-[13px] text-[var(--muted)] mt-1">
-          {progress.txHashes.length > 0 ? `${progress.txHashes.length * 24} slots enviados` : 'Firmá la transacción en tu wallet…'}
-        </p>
+        <p className="font-semibold text-[15px]">Creando semana…</p>
+        <p className="text-[13px] text-[var(--muted)] mt-1">Firmá la transacción en tu wallet…</p>
       </div>
-      <div className="w-full bg-[var(--paper-2)] rounded-full h-1.5 overflow-hidden">
-        <div className="h-full bg-[var(--accent)] rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
-      </div>
-      {progress.txHashes.map((h, i) => (
-        <div key={h} className="w-full text-[11px] font-mono text-[var(--muted)] bg-[var(--paper-2)] px-3 py-1.5 rounded-lg">
-          Lote {i + 1}: {h.slice(0, 16)}…
-        </div>
-      ))}
     </div>
   )
 }

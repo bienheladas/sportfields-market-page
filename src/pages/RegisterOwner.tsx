@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useLucid } from '../lib/LucidContext';
 
 import { useRegisterOwner, type RegisterOwnerFields } from '../hooks/useRegisterOwner';
-import { useOwnerRecord } from '../hooks/useOwnerRecord';
+import { useOwnerFields } from '../hooks/useOwnerFields';
 import { WalletModal } from '../components/WalletModal';
 
 const LIMITS = { fieldName: 64, fieldAddress: 64, phone: 32, email: 64 } as const;
@@ -27,7 +27,7 @@ export default function RegisterOwner() {
   const { register, loading, error } = useRegisterOwner();
 
   const viewerPkh = pkh || null;
-  const { record: existingRecord, loading: recordLoading } = useOwnerRecord(viewerPkh);
+  const { fields: existingFields } = useOwnerFields(connected ? viewerPkh : null);
 
   const [step, setStep] = React.useState<Step>('form');
   const [fields, setFields] = React.useState<RegisterOwnerFields>(INITIAL_FIELDS);
@@ -44,37 +44,6 @@ export default function RegisterOwner() {
     }
   };
 
-  if (connected && !recordLoading && existingRecord) {
-    return (
-      <PageShell>
-        <BackLink onClick={() => navigate(-1)} />
-        <h1 className="m-0 mb-2 text-[36px] font-bold tracking-[-0.025em] leading-[1.05]">
-          Ya estás registrado
-        </h1>
-        <p className="m-0 mb-9 text-base text-[var(--muted)] max-w-[540px] leading-snug">
-          Tu wallet ya tiene un Owner NFT acuñado. Puedes gestionar tu cancha y los slots
-          desde el panel de propietario.
-        </p>
-        <div className="flex gap-2.5">
-          <button
-            type="button"
-            onClick={() => navigate('/owner')}
-            className="px-[18px] py-3 rounded-[10px] bg-[var(--ink)] text-[var(--paper)] font-semibold text-[14px]"
-          >
-            Ir a mi panel
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="px-[18px] py-3 rounded-[10px] bg-[var(--paper)] border border-[var(--line-strong)] text-[var(--ink)] font-semibold text-[14px]"
-          >
-            Volver al inicio
-          </button>
-        </div>
-      </PageShell>
-    );
-  }
-
   return (
     <PageShell>
       <BackLink onClick={() => (step === 'form' ? navigate('/') : setStep('form'))} />
@@ -87,6 +56,11 @@ export default function RegisterOwner() {
             title="Registra tu cancha en Sportfields"
             lede="Una vez registrada, podrás definir precios e inicializar slots semanales. La info se guarda on-chain como parte de tu Owner NFT."
           />
+          {existingFields.length > 0 && (
+            <Banner tone="amber" className="mb-6">
+              Ya tienes {existingFields.length} cancha{existingFields.length > 1 ? 's' : ''} registrada{existingFields.length > 1 ? 's' : ''}. Puedes registrar otra con una nueva transacción.
+            </Banner>
+          )}
           <FormStep
             fields={fields}
             onChange={setFields}
@@ -101,7 +75,7 @@ export default function RegisterOwner() {
         <>
           <Heading
             title="Revisá antes de firmar"
-            lede="Esta transacción acuña tu Owner NFT y bloquea 502 ADA en el contrato. La firma se hace desde tu wallet."
+            lede="Esta transacción acuña tu Owner NFT y lo deposita en el contrato con un min-UTxO de 2 ADA. La firma se hace desde tu wallet."
           />
           <PreviewStep
             fields={fields}
@@ -373,15 +347,14 @@ function PreviewStep({
         </header>
         <div className="px-6 py-5">
           <Banner tone="mint" className="mb-4">
-            Los <strong>500 ADA de colateral</strong> permanecen bloqueados en el contrato y se recuperan cuando cierres el registro. La <strong>fee de 5 ADA</strong> y la fee de red no son recuperables.
+            El <strong>min-UTxO de 2 ADA</strong> queda bloqueado en el contrato junto al Owner NFT y es recuperable. La <strong>fee de 5 ADA</strong> y la fee de red no son recuperables.
           </Banner>
 
           <ul className="m-0 p-0 list-none flex flex-col gap-0">
-            <CostRow label="Colateral bloqueado en el script" sub="Recuperable · queda en OwnersValidator junto al Owner NFT" v="500.00 ₳" />
-            <CostRow label="Min-UTxO del script output" sub="Recuperable · parte del valor bloqueado" v="2.00 ₳" />
+            <CostRow label="Min-UTxO del script output" sub="Recuperable · queda en OwnersValidator junto al Owner NFT" v="2.00 ₳" />
             <CostRow label="Registration fee" sub="No recuperable · va a la company" v="5.00 ₳" />
             <CostRow label="Fee de red (estimada)" sub="No recuperable · pagada al pool" v="~ 0.50 ₳" />
-            <CostRow label="Total a debitar de tu wallet" sub="500 ADA recuperables después" v="~ 507.50 ₳" total />
+            <CostRow label="Total a debitar de tu wallet" sub="2 ADA recuperables después" v="~ 7.50 ₳" total />
           </ul>
 
           {error && (
@@ -458,7 +431,7 @@ function SuccessStep({
         </div>
         <h2 className="m-0 mb-2 text-[24px] font-bold tracking-[-0.015em] text-center">¡Cancha registrada!</h2>
         <p className="m-0 mb-6 text-center text-[var(--muted)] text-[14px] max-w-[420px] mx-auto leading-snug">
-          Tu Owner NFT está acuñado y los 502 ADA quedaron bloqueados en el script. Ahora puedes inicializar los 168 slots semanales desde tu panel.
+          Tu Owner NFT está acuñado y depositado en el contrato. Ahora puedes inicializar los 168 slots semanales desde tu panel.
         </p>
 
         <div className="bg-[var(--paper-2)] border border-[var(--line)] rounded-[10px] px-4 py-3.5 mb-5 flex items-center justify-between gap-3 flex-wrap">

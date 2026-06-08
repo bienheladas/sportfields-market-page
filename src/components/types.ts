@@ -56,7 +56,43 @@ export const SLOT_STATUS_BY_TAG: SlotStatus[] = [
 ];
 
 // ───────────────────────────────────────────────────────────────────
-// RentDatum (RentValidator.hs — one UTxO per slot)
+// Linked-list types (Aiken on-chain)
+// ───────────────────────────────────────────────────────────────────
+
+/** Pointer to the next node in the on-chain sorted linked list. */
+export type NodeKey =
+  | { tag: 'Key'; key: number }
+  | { tag: 'Empty' }
+
+/** Per-week configuration stored in ListHead. */
+export interface WeekConfig {
+  weekStartPosix: number          // POSIX ms
+  slotDurationMs: number
+  cancelDeadlineOffsetMs: number
+  rentPrice: Lovelace
+  siteCommissionBps: number
+  openSlotIds: number[]           // slot IDs enabled this week
+  loyaltyNftsRequired: number
+}
+
+/** Datum for the ListHead UTxO at rent_spend. Wraps WeekConfig + next pointer. */
+export interface ListHeadDatum {
+  ownerNFTName: TokenName
+  ownerPkh: PubKeyHash
+  companyPkh: PubKeyHash
+  fieldName: BBS
+  fieldAddress: BBS
+  phone: BBS
+  email: BBS
+  lat: BBS
+  long: BBS
+  paymentAddress: BBS
+  config: WeekConfig
+  next: NodeKey
+}
+
+// ───────────────────────────────────────────────────────────────────
+// RentDatum (Aiken — one UTxO per active slot node)
 // ───────────────────────────────────────────────────────────────────
 
 export interface RentDatum {
@@ -81,9 +117,9 @@ export interface RentDatum {
   // State
   status: SlotStatus;
   customerPkh: Maybe<PubKeyHash>;
-  /** Set on ConfirmRent (Tx 5), cleared on RedeemAtField / CancelRent. */
+  /** Set on ConfirmRent, cleared on RedeemAtField / CancelRent. */
   rentNFTName: Maybe<TokenName>;
-  /** Set on OpenDispute (Tx 7) — customer's escrowed deposit. */
+  /** Set on OpenDispute — customer's escrowed deposit. */
   disputeDeposit: Maybe<Lovelace>;
 
   // Field metadata (replicated for off-chain UX)
@@ -94,21 +130,28 @@ export interface RentDatum {
   lat: BBS;
   long: BBS;
   paymentAddress: BBS;
+
+  /** Linked-list pointer to next node. */
+  next: NodeKey;
+  weekEnd: POSIXTime;
+  loyaltyNftsRequired: number;
 }
 
 // ───────────────────────────────────────────────────────────────────
-// RentRedeemer
+// RentRedeemer (indices match Aiken constructor order)
 // ───────────────────────────────────────────────────────────────────
 
 export type RentRedeemer =
-  | { tag: 'Reserve'; customerPkh: PubKeyHash }   // index 0 · Tx 4
-  | { tag: 'ConfirmRent' }                         // index 1 · Tx 5
-  | { tag: 'CancelRent' }                          // index 2 · Tx 6
-  | { tag: 'OpenDispute' }                         // index 3 · Tx 7
-  | { tag: 'RedeemAtField' }                       // index 4 · Tx 8
-  | { tag: 'CollectSlot' }                         // index 5 · Tx 9
-  | { tag: 'ResolveToCustomer' }                   // index 6 · Tx 11
-  | { tag: 'ResolveToOwner' };                     // index 7 · Tx 12
+  | { tag: 'ConfirmRent' }                          // index 0
+  | { tag: 'CancelRent' }                           // index 1
+  | { tag: 'OpenDispute' }                          // index 2
+  | { tag: 'RedeemAtField' }                        // index 3
+  | { tag: 'CollectSlot' }                          // index 4
+  | { tag: 'ResolveToCustomer' }                    // index 5
+  | { tag: 'ResolveToOwner' }                       // index 6
+  | { tag: 'InsertPrev'; newNext: NodeKey }          // index 7
+  | { tag: 'RemovePrev'; newNext: NodeKey }          // index 8
+  | { tag: 'DeinitWeek' };                          // index 9
 
 // ───────────────────────────────────────────────────────────────────
 // OwnersDatum (OwnersValidator.hs — sum of two variants)
@@ -147,6 +190,7 @@ export interface OwnerRecord {
   lat: BBS;
   long: BBS;
   paymentAddress: BBS;
+  guaranteePerSlot: bigint;
 }
 
 export type OwnersDatum =

@@ -122,6 +122,7 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
   const [showCancelModal,  setShowCancelModal]  = React.useState(false)
   const [showDisputeModal, setShowDisputeModal] = React.useState(false)
   const [showRedeemModal,  setShowRedeemModal]  = React.useState(false)
+  const [txHash, setTxHash] = React.useState<string | null>(null)
 
   const datum  = slot.datum
   const status = datum.status
@@ -156,25 +157,28 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
   // ── Handlers ──────────────────────────────────────────────────────
   const handleCancel = async () => {
     try {
-      await cancel(slot)
+      const hash = await cancel(slot)
       setShowCancelModal(false)
-      onActionDone()
+      setTxHash(hash)
+      setTimeout(() => onActionDone(), 3_000)
     } catch { /* error shown inline */ }
   }
 
   const handleDispute = async () => {
     try {
-      await openDispute(slot)
+      const hash = await openDispute(slot)
       setShowDisputeModal(false)
-      onActionDone()
+      setTxHash(hash)
+      setTimeout(() => onActionDone(), 3_000)
     } catch { /* error shown inline */ }
   }
 
   const handleRedeem = async () => {
     try {
-      await redeemAtField(slot)
+      const hash = await redeemAtField(slot)
       setShowRedeemModal(false)
-      onActionDone()
+      setTxHash(hash)
+      setTimeout(() => onActionDone(), 3_000)
     } catch { /* error shown inline */ }
   }
 
@@ -310,6 +314,14 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
           </div>
         </details>
 
+        {/* Success banner */}
+        {txHash && (
+          <div className="px-4 py-2.5 flex items-center justify-between gap-3 bg-[var(--mint-bg)] border-t border-[#b9d8c1] text-[11px] text-[#244d33]">
+            <span>¡Tx enviada! <span className="font-mono">{txHash.slice(0, 12)}…</span></span>
+            <button onClick={() => setTxHash(null)} className="text-[var(--muted)] hover:text-[var(--ink)]">✕</button>
+          </div>
+        )}
+
         {/* Error display */}
         {anyError && (
           <div className="px-4 pb-3 text-[11px] text-[var(--rose-ink)] bg-[var(--rose-bg)] border-t border-[var(--line)]">
@@ -434,7 +446,7 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
             </div>
             <h2 className="text-center font-bold text-[var(--ink)] mb-1">Redimir NFT en cancha</h2>
             <p className="text-center text-xs text-[var(--muted)] mb-4">
-              Se quemará tu Rent NFT y todos los fondos se enviarán al dueño de la cancha.
+              Tu Rent NFT se transfiere a tu wallet como token de lealtad. El slot pasa a Completado.
             </p>
 
             {/* Summary */}

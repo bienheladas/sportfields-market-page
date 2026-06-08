@@ -14,6 +14,10 @@ export interface OwnerRecordCardProps {
   onUpdateInfo?: () => void;
   /** Collect payments — Tx 9. */
   onCollectPayments?: () => void;
+  /** Number of Completed slots waiting to be collected. */
+  completedCount?: number;
+  /** True while a collect tx is in-flight. */
+  collecting?: boolean;
 }
 
 export function OwnerRecordCard({
@@ -21,6 +25,8 @@ export function OwnerRecordCard({
   viewerPkh,
   onUpdateInfo,
   onCollectPayments,
+  completedCount = 0,
+  collecting = false,
 }: OwnerRecordCardProps) {
   const isOwner = viewerPkh && record.ownerPkh === viewerPkh;
   const geo = parseLatLong(record.lat, record.long);
@@ -88,9 +94,15 @@ export function OwnerRecordCard({
           {onCollectPayments && (
             <button
               onClick={onCollectPayments}
-              className="px-3.5 py-2 rounded-[10px] text-[12px] font-semibold border border-[var(--accent)] bg-[var(--accent)] text-white hover:bg-[var(--accent-deep)]"
+              disabled={collecting || completedCount === 0}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-[12px] font-semibold border border-[var(--accent)] bg-[var(--accent)] text-white hover:bg-[var(--accent-deep)] disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Cobrar pagos · Tx 9
+              {collecting ? 'Cobrando…' : 'Cobrar pagos'}
+              {completedCount > 0 && (
+                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white/25 text-[10px] font-bold">
+                  {completedCount}
+                </span>
+              )}
             </button>
           )}
         </footer>
