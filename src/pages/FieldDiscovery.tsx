@@ -4,7 +4,7 @@
 
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { RentDatum, FieldSummary } from '../components/types';
+import type { RentDatum, ListHeadDatum, FieldSummary } from '../components/types';
 import { useRentSlots } from '../hooks/useRentSlots';
 import { decodeBBS, slotIdToCoord } from '../components/lib';
 import { SlotFilterBar, type SlotFilter, type DayKey } from '../components/SlotFilterBar';
@@ -24,29 +24,33 @@ function slotMatchesFilter(slotId: number, filter: SlotFilter): boolean {
   return true;
 }
 
-export function groupBySummary(slots: RentDatum[], filter: SlotFilter): FieldSummary[] {
-  const map = new Map<string, FieldSummary>();
+export function groupBySummary(slots: RentDatum[], heads: ListHeadDatum[], filter: SlotFilter): FieldSummary[] {
+  // Build set of taken slot IDs per owner
+  const takenByOwner = new Map<string, Set<number>>();
   for (const s of slots) {
-    let entry = map.get(s.ownerNFTName);
-    if (!entry) {
-      entry = {
-        ownerNFTName: s.ownerNFTName,
-        fieldName: s.fieldName,
-        fieldAddress: s.fieldAddress,
-        phone: s.phone,
-        email: s.email,
-        lat: s.lat,
-        long: s.long,
-        rentPrice: s.rentPrice,
-        slotsAvailable: 0,
-      };
-      map.set(s.ownerNFTName, entry);
-    }
-    if (s.status === 'Available' && slotMatchesFilter(s.slotId, filter)) {
-      entry.slotsAvailable += 1;
-    }
+    let set = takenByOwner.get(s.ownerNFTName);
+    if (!set) { set = new Set(); takenByOwner.set(s.ownerNFTName, set); }
+    set.add(s.slotId);
   }
-  return [...map.values()].sort((a, b) => {
+
+  // One entry per ListHead (one active week per owner)
+  return heads.map(h => {
+    const taken = takenByOwner.get(h.ownerNFTName) ?? new Set<number>();
+    const slotsAvailable = h.config.openSlotIds.filter(
+      id => !taken.has(id) && slotMatchesFilter(id, filter)
+    ).length;
+    return {
+      ownerNFTName: h.ownerNFTName,
+      fieldName: h.fieldName,
+      fieldAddress: h.fieldAddress,
+      phone: h.phone,
+      email: h.email,
+      lat: h.lat,
+      long: h.long,
+      rentPrice: h.config.rentPrice,
+      slotsAvailable,
+    };
+  }).sort((a, b) => {
     if (b.slotsAvailable !== a.slotsAvailable) return b.slotsAvailable - a.slotsAvailable;
     return decodeBBS(a.fieldName).localeCompare(decodeBBS(b.fieldName));
   });
@@ -56,14 +60,15 @@ export function groupBySummary(slots: RentDatum[], filter: SlotFilter): FieldSum
 
 export default function FieldDiscovery() {
   const navigate = useNavigate();
-  const { slots: utxos, loading, error } = useRentSlots();
+  const { slots: utxos, heads: headUtxos, loading, error } = useRentSlots();
 
-  const datums = React.useMemo(() => utxos.map(u => u.datum), [utxos]);
+  const datums     = React.useMemo(() => utxos.map(u => u.datum), [utxos]);
+  const headDatums = React.useMemo(() => headUtxos.map(h => h.datum), [headUtxos]);
   const [filter, setFilter] = React.useState<SlotFilter>({ day: null, hour: null });
 
   const fields = React.useMemo<FieldSummary[]>(
-    () => groupBySummary(datums, filter),
-    [datums, filter],
+    () => groupBySummary(datums, headDatums, filter),
+    [datums, headDatums, filter],
   );
 
   const hasActiveFilter = filter.day != null || filter.hour != null;
@@ -71,7 +76,8 @@ export default function FieldDiscovery() {
   const totalAvailable = fields.reduce((s, f) => s + f.slotsAvailable, 0);
   const visibleAvailable = visible.reduce((s, f) => s + f.slotsAvailable, 0);
 
-  const goToField = (ownerNFTName: string) => navigate(`/field/${ownerNFTName}`);
+  const goToField = (ownerNFTName: string, fieldName: string) =>
+    navigate(`/field/${ownerNFTName}?fn=${fieldName}`);
   const gridRef = React.useRef<HTMLDivElement>(null);
   const scrollToGrid = () => gridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -110,7 +116,7 @@ export default function FieldDiscovery() {
         ) : (
           <div className="grid grid-cols-3 max-lg:grid-cols-2 max-sm:grid-cols-1 gap-[22px] max-lg:gap-[18px]">
             {visible.map((f) => (
-              <FieldCard key={f.ownerNFTName} field={f} onOpen={goToField} />
+              <FieldCard key={f.ownerNFTName + f.fieldName} field={f} onOpen={goToField} />
             ))}
           </div>
         )}

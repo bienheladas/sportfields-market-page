@@ -8,7 +8,7 @@ import { PriceAda } from './atoms';
 
 export interface FieldCardProps {
   field: FieldSummary;
-  onOpen?: (ownerNFTName: string) => void;
+  onOpen?: (ownerNFTName: string, fieldName: string) => void;
   compact?: boolean;
   className?: string;
 }
@@ -24,7 +24,7 @@ function gradientFor(ownerNFTName: string): GradId {
 
 export function FieldCard({ field, onOpen, compact = false, className = '' }: FieldCardProps) {
   const slots = field.slotsAvailable;
-  const handleOpen = () => onOpen?.(field.ownerNFTName);
+  const handleOpen = () => onOpen?.(field.ownerNFTName, field.fieldName);
 
   return (
     <article

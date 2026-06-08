@@ -5,15 +5,45 @@ import {
   OWNERS_VALIDATOR_ADDR,
   OWNER_NFT_POLICY,
   COMPANY_PKH,
+  COMPANY_ADDR,
   OWNERS_MINT_COMPILED,
   REGISTRATION_FEE_LOVELACE,
   SCRIPT_LOVELACE,
 } from '../lib/config'
 import { unwrapSubmitError } from '../lib/unwrapSubmitError'
 
+function metaStr(s: string): string | string[] {
+  if (s.length <= 64) return s
+  const chunks: string[] = []
+  for (let i = 0; i < s.length; i += 64) chunks.push(s.slice(i, i + 64))
+  return chunks
+}
+
+function makeOwnerNftImage(): string[] {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">` +
+    `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="96" gradientUnits="userSpaceOnUse">` +
+    `<stop offset="0%" stop-color="#ef4444"/>` +
+    `<stop offset="100%" stop-color="#7f1d1d"/>` +
+    `</linearGradient></defs>` +
+    `<rect width="96" height="96" rx="10" fill="url(#g)"/>` +
+    `<rect x="8" y="16" width="80" height="64" rx="2" stroke="rgba(255,255,255,.5)" stroke-width="1.5" fill="none"/>` +
+    `<line x1="48" y1="16" x2="48" y2="80" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/>` +
+    `<circle cx="48" cy="48" r="12" stroke="rgba(255,255,255,.5)" stroke-width="1.5" fill="none"/>` +
+    `<circle cx="48" cy="48" r="2" fill="rgba(255,255,255,.7)"/>` +
+    `<rect x="8" y="33" width="14" height="30" stroke="rgba(255,255,255,.35)" stroke-width="1" fill="none"/>` +
+    `<rect x="74" y="33" width="14" height="30" stroke="rgba(255,255,255,.35)" stroke-width="1" fill="none"/>` +
+    `</svg>`
+  const dataUri = `data:image/svg+xml;base64,${btoa(svg)}`
+  const chunks: string[] = []
+  for (let i = 0; i < dataUri.length; i += 64) chunks.push(dataUri.slice(i, i + 64))
+  return chunks
+}
+
 // Pre-apply parameters: owners_minting_policy(companyPkh, registrationFee, collateral)
+// collateral=0n en este deploy (la garantía dinámica por slot cubre el colateral)
 const appliedOwnersMint = applyParamsToScript(OWNERS_MINT_COMPILED, [
-  new Constr(0, [COMPANY_PKH, 5_000_000n, 500_000_000n])
+  new Constr(0, [COMPANY_PKH, 5_000_000n, 0n])
 ])
 
 export interface RegisterOwnerFields {
@@ -75,45 +105,64 @@ export function useRegisterOwner(): UseRegisterOwner {
       setError(null)
 
       try {
-        // ── Token name = ownerPkh (28-byte hex) ───────────────────
-        const tokenNameHex = ownerPkh
+        // ── Token name = ownerPkh (28 B) + random 4 B suffix = 32 B ──
+        const randomSuffix = Array.from(crypto.getRandomValues(new Uint8Array(4)))
+          .map(b => b.toString(16).padStart(2, '0')).join('')
+        const tokenNameHex = ownerPkh + randomSuffix
         const tokenUnit    = OWNER_NFT_POLICY + tokenNameHex
 
         // ── Mint redeemer: MintOwnerNFT = Constr 0 [ownerPkh] ────
         const mintRedeemer = Data.to(new Constr(0, [ownerPkh]))
 
-        // ── Datum: DatumOwner = Constr 1 [OwnerRecord] ───────────
+        // guarantee_per_slot: rent_price × guarantee_bps / 10000
+        // 20 ADA × 2000 / 10000 = 4 ADA — debe coincidir con init-week.mjs
+        const guaranteePerSlot = 4_000_000n
+
+        // ── Datum: DatumOwner = Constr 1 [OwnerRecord (14 campos)] ─
         const ownerRecord = new Constr(0, [
-          tokenNameHex,                    // ownerNFTName = pkh
-          ownerPkh,                        // ownerPkh
-          0n,                              // rentalsCompleted
-          0n,                              // rentalsRefunded
-          0n,                              // rentalsDisputed
-          0n,                              // rentNFTsProven
-          fromText(fields.fieldName),      // fieldName
-          fromText(fields.fieldAddress),   // address
-          fromText(fields.phone),          // phone
-          fromText(fields.email),          // email
-          fromText(fields.lat),            // lat
-          fromText(fields.long_),          // long
-          ownerPkh,                        // paymentAddress = pkh raw
+          tokenNameHex,                    // 0: ownerNFTName = pkh
+          ownerPkh,                        // 1: ownerPkh
+          0n,                              // 2: rentalsCompleted
+          0n,                              // 3: rentalsRefunded
+          0n,                              // 4: rentalsDisputed
+          0n,                              // 5: rentNFTsProven
+          fromText(fields.fieldName),      // 6: fieldName
+          fromText(fields.fieldAddress),   // 7: address
+          fromText(fields.phone),          // 8: phone
+          fromText(fields.email),          // 9: email
+          fromText(fields.lat),            // 10: lat
+          fromText(fields.long_),          // 11: long
+          ownerPkh,                        // 12: paymentAddress = pkh raw
+          guaranteePerSlot,                // 13: guarantee_per_slot
         ])
         const datum = Data.to(new Constr(1, [ownerRecord]))
 
-        // ── Company address (receives registration fee) ───────────
-        // We send to an address derived from company PKH on Preview
-        const companyAddr = 'addr_test1vrs7gwjvkqyats7ka44y8pt5tcy5xc25y2k6hk5ey94ys3sm65ak6'
-
         // ── Build Tx ─────────────────────────────────────────────
+        // G: NFT → owner's wallet (transferable); stats UTxO → contract (sin NFT)
+        const ownerWalletAddr = await lucid.wallet().address()
+        const ownerNftImage = makeOwnerNftImage()
         const tx = await lucid.newTx()
           .mintAssets({ [tokenUnit]: 1n }, mintRedeemer)
           .attach.MintingPolicy({ type: 'PlutusV3', script: appliedOwnersMint })
+          .attachMetadata(721, {
+            [OWNER_NFT_POLICY]: {
+              [tokenNameHex]: {
+                name: metaStr(`${fields.fieldName} — Propietario`),
+                description: metaStr(`NFT de propietario para "${fields.fieldName}" en Sportfields.`),
+                image: ownerNftImage,
+              },
+            },
+          })
+          // Stats UTxO al contrato — sin NFT
           .pay.ToContract(
             OWNERS_VALIDATOR_ADDR,
             { kind: 'inline', value: datum },
-            { lovelace: SCRIPT_LOVELACE, [tokenUnit]: 1n },
+            { lovelace: SCRIPT_LOVELACE },
           )
-          .pay.ToAddress(companyAddr, { lovelace: REGISTRATION_FEE_LOVELACE })
+          // NFT → wallet del owner (mejora G: transferible)
+          .pay.ToAddress(ownerWalletAddr, { lovelace: 2_000_000n, [tokenUnit]: 1n })
+          // Fee de registro → company
+          .pay.ToAddress(COMPANY_ADDR, { lovelace: REGISTRATION_FEE_LOVELACE })
           .addSignerKey(ownerPkh)
           .complete()
 

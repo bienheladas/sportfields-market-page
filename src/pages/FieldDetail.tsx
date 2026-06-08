@@ -10,7 +10,7 @@
 // Identidad del viewer: pkh extraído directamente de useLucid().
 
 import * as React from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useLucid } from '../lib/LucidContext';
 
 import type { RentDatum } from '../components/types';
@@ -20,11 +20,12 @@ import {
   shortenAddr,
 } from '../components/lib';
 import { useRentSlots } from '../hooks/useRentSlots';
+import type { RentSlotUtxo, ListHeadUtxo } from '../hooks/useRentSlots';
 import { useOwnerRecord } from '../hooks/useOwnerRecord';
 import { useCancelSlot } from '../hooks/useCancelSlot';
 
 import { WeekCalendar, CalendarLegend } from '../components/WeekCalendar';
-import type { RentSlotUtxo } from '../hooks/useRentSlots';
+import type { RentSlotUtxoLike } from '../components/WeekCalendar';
 import { BookingPanel } from '../components/BookingPanel';
 import { WalletModal } from '../components/WalletModal';
 import { FieldMap } from '../components/FieldMap';
@@ -36,17 +37,47 @@ import { useReserveSlot } from '../hooks/useReserveSlot';
 
 export default function FieldDetail() {
   const { ownerNFT = '' } = useParams<{ ownerNFT: string }>();
+  const [searchParams] = useSearchParams();
+  const fieldNameFilter = searchParams.get('fn');
   const navigate = useNavigate();
   const { connected, pkh: viewerPkh } = useLucid();
 
-  const { slots, loading: slotsLoading, error: slotsError, reload } = useRentSlots(ownerNFT);
+  const { slots, heads, loading: slotsLoading, error: slotsError, reload } = useRentSlots(ownerNFT);
 
-  // El ownerPkh sale del primer datum disponible — todos los slots de
-  // una cancha comparten el mismo ownerPkh por construcción on-chain.
-  const ownerPkh = slots?.[0]?.datum.ownerPkh ?? '';
+  // ── Semanas disponibles (una head por semana inicializada) ──
+  const sortedHeads = React.useMemo(() => {
+    const filtered = fieldNameFilter
+      ? heads.filter(h => h.datum.fieldName === fieldNameFilter)
+      : heads
+    return [...filtered].sort((a, b) => a.datum.config.weekStartPosix - b.datum.config.weekStartPosix)
+  }, [heads, fieldNameFilter]);
+
+  const [weekIdx, setWeekIdx] = React.useState(0);
+
+  // Al cargar, saltar a la semana que contiene "ahora" (o la última)
+  React.useEffect(() => {
+    if (sortedHeads.length === 0) return;
+    const nowMs = Date.now();
+    const idx = sortedHeads.findIndex(h => {
+      const ws = h.datum.config.weekStartPosix;
+      return nowMs >= ws && nowMs < ws + 7 * 24 * 3_600_000;
+    });
+    setWeekIdx(idx >= 0 ? idx : sortedHeads.length - 1);
+  }, [sortedHeads.length]);
+
+  const head = sortedHeads[weekIdx] ?? null;
+
+  // Slots filtrados por la semana seleccionada
+  const weekSlots = React.useMemo(() => {
+    if (!head) return slots;
+    const weekEnd = head.datum.config.weekStartPosix + 7 * 24 * 3_600_000;
+    return slots.filter(s => s.datum.weekEnd === weekEnd);
+  }, [slots, head]);
+
+  const ownerPkh = head?.datum.ownerPkh ?? slots?.[0]?.datum.ownerPkh ?? '';
   const { record, loading: recordLoading } = useOwnerRecord(ownerPkh);
 
-  const [selected, setSelected] = React.useState<RentSlotUtxo | null>(null);
+  const [selected, setSelected] = React.useState<RentSlotUtxoLike | null>(null);
   const [walletModalOpen, setWalletModalOpen] = React.useState(false);
   const { reserve, loading: reserving, error: reserveError } = useReserveSlot();
   const { cancel: cancelSlot } = useCancelSlot();
@@ -55,7 +86,7 @@ export default function FieldDetail() {
 
   const calendarRef = React.useRef<HTMLDivElement>(null);
 
-  // ── Identidad de la cancha (del datum o del OwnerRecord) ──────
+  // ── Identidad de la cancha ──────────────────────────────────
   const identity = React.useMemo(() => {
     if (record) {
       return {
@@ -65,6 +96,17 @@ export default function FieldDetail() {
         email: decodeBBS(record.email),
         lat: record.lat,
         long: record.long,
+      };
+    }
+    if (head) {
+      const h = head.datum;
+      return {
+        fieldName: decodeBBS(h.fieldName),
+        fieldAddress: decodeBBS(h.fieldAddress),
+        phone: decodeBBS(h.phone),
+        email: decodeBBS(h.email),
+        lat: h.lat,
+        long: h.long,
       };
     }
     const first = slots?.[0]?.datum;
@@ -79,30 +121,34 @@ export default function FieldDetail() {
       };
     }
     return null;
-  }, [record, slots]);
+  }, [record, head, slots]);
 
   // ── Stats agregadas ─────────────────────────────────────────
   const stats = React.useMemo(() => {
-    if (!slots) return { available: 0, byStatus: {} as Partial<Record<RentDatum['status'], number>> };
+    const taken = new Set(weekSlots.map(s => s.datum.slotId));
+    const available = head
+      ? head.datum.config.openSlotIds.filter(id => !taken.has(id)).length
+      : 0;
     const byStatus: Partial<Record<RentDatum['status'], number>> = {};
-    for (const s of slots) byStatus[s.datum.status] = (byStatus[s.datum.status] ?? 0) + 1;
-    return { available: byStatus['Available'] ?? 0, byStatus };
-  }, [slots]);
+    for (const s of weekSlots) byStatus[s.datum.status] = (byStatus[s.datum.status] ?? 0) + 1;
+    return { available, byStatus };
+  }, [weekSlots, head]);
 
   // ── Reserva activa del viewer en esta cancha ────────────────
   const myActiveSlot = React.useMemo<RentSlotUtxo | null>(() => {
-    if (!viewerPkh || !slots) return null;
-    return slots.find(
+    if (!viewerPkh || !weekSlots) return null;
+    return weekSlots.find(
       (s) =>
         s.datum.customerPkh === viewerPkh &&
         (s.datum.status === 'Pending' || s.datum.status === 'Confirmed'),
     ) ?? null;
-  }, [viewerPkh, slots]);
+  }, [viewerPkh, weekSlots]);
 
-  // ── Precio y comisión (asumimos uniforme por cancha) ────────
-  const sample = slots?.[0]?.datum;
-  const pricePerHourAda = sample ? Number(sample.rentPrice) / 1_000_000 : 0;
-  const commissionBps = sample?.siteCommissionBps ?? 100;
+  // ── Precio y comisión ───────────────────────────────────────
+  const pricePerHourAda = head
+    ? Number(head.datum.config.rentPrice) / 1_000_000
+    : (slots?.[0] ? Number(slots[0].datum.rentPrice) / 1_000_000 : 0);
+  const commissionBps = head?.datum.config.siteCommissionBps ?? slots?.[0]?.datum.siteCommissionBps ?? 100;
 
   const scrollToCalendar = () =>
     calendarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -211,7 +257,13 @@ export default function FieldDetail() {
         <header className="flex flex-wrap items-baseline gap-4 mb-4.5">
           <h2 className="m-0 text-2xl font-bold tracking-[-0.018em]">Calendario semanal</h2>
           <span className="text-[var(--muted)] text-[14px]">7 días × 24 horas · 168 slots</span>
-          <WeekNav />
+          <WeekNav
+            weekIdx={weekIdx}
+            totalWeeks={sortedHeads.length}
+            head={head}
+            onPrev={() => setWeekIdx(i => Math.max(0, i - 1))}
+            onNext={() => setWeekIdx(i => Math.min(sortedHeads.length - 1, i + 1))}
+          />
         </header>
 
         <div className="mb-3.5">
@@ -222,9 +274,10 @@ export default function FieldDetail() {
           <CalendarSkeleton />
         ) : (
           <WeekCalendar
-            slots={slots ?? []}
+            head={head}
+            slots={weekSlots}
             selectedSlotId={selected?.datum.slotId ?? null}
-            onSelectSlot={(s) => setSelected(s as RentSlotUtxo)}
+            onSelectSlot={(s) => setSelected(s)}
           />
         )}
       </section>
@@ -262,14 +315,16 @@ export default function FieldDetail() {
         onClose={() => setSelected(null)}
         onConnectWallet={() => setWalletModalOpen(true)}
         onReserve={async (s) => {
-          const txHash = await reserve(s);
+          if (!head) throw new Error('Semana no inicializada');
+          const txHash = await reserve(head, s.datum.slotId);
           setSelected(null);
           setReserveTxHash(txHash);
           setTimeout(() => reload(), 3_000);
         }}
-        onCancel={async (_s) => {
-          if (!selected) return;
-          const txHash = await cancelSlot(selected);
+        onCancel={async () => {
+          const fullSlot = slots.find(s => s.datum.slotId === selected?.datum.slotId);
+          if (!fullSlot) return;
+          const txHash = await cancelSlot(fullSlot);
           setSelected(null);
           setCancelTxHash(txHash);
           setTimeout(() => reload(), 3_000);
@@ -504,31 +559,41 @@ function StatPill({
   );
 }
 
-function WeekNav() {
+function WeekNav({
+  weekIdx,
+  totalWeeks,
+  head,
+  onPrev,
+  onNext,
+}: {
+  weekIdx: number;
+  totalWeeks: number;
+  head: ListHeadUtxo | null;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const canPrev = weekIdx > 0;
+  const canNext = weekIdx < totalWeeks - 1;
+  const label = head ? weekLabel(head.datum.config.weekStartPosix) : '—';
+  const btnCls = (enabled: boolean) =>
+    [
+      'w-8 h-8 border border-[var(--line-strong)] bg-[var(--paper)] rounded-lg grid place-items-center',
+      enabled
+        ? 'text-[var(--ink)] hover:bg-[var(--paper-2)] cursor-pointer'
+        : 'text-[var(--ink-2)] cursor-not-allowed opacity-45',
+    ].join(' ');
   return (
     <div className="ml-auto flex items-center gap-1.5">
-      <button
-        type="button"
-        disabled
-        title="Próximamente"
-        className="w-8 h-8 border border-[var(--line-strong)] bg-[var(--paper)] rounded-lg grid place-items-center text-[var(--ink-2)] cursor-not-allowed opacity-45"
-      >
+      <button type="button" disabled={!canPrev} onClick={onPrev} className={btnCls(canPrev)}>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
           <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
       <span className="px-3 py-1.5 rounded-lg bg-[var(--paper-2)] text-[13px] font-semibold text-[var(--ink)]">
-        Semana actual{' '}
-        <span className="font-mono font-medium text-[var(--muted)] ml-1">
-          {weekLabel()}
-        </span>
+        {totalWeeks > 1 ? `Semana ${weekIdx + 1}/${totalWeeks}` : 'Semana actual'}{' '}
+        <span className="font-mono font-medium text-[var(--muted)] ml-1">{label}</span>
       </span>
-      <button
-        type="button"
-        disabled
-        title="Próximamente"
-        className="w-8 h-8 border border-[var(--line-strong)] bg-[var(--paper)] rounded-lg grid place-items-center text-[var(--ink-2)] cursor-not-allowed opacity-45"
-      >
+      <button type="button" disabled={!canNext} onClick={onNext} className={btnCls(canNext)}>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
           <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -537,16 +602,10 @@ function WeekNav() {
   );
 }
 
-function weekLabel(): string {
-  const now = new Date();
-  const day = (now.getDay() + 6) % 7;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - day);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  const fmt = (d: Date) =>
-    d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
-  return `${fmt(monday)} – ${fmt(sunday)}`;
+function weekLabel(weekStartPosix: number): string {
+  const fmt = (ts: number) =>
+    new Date(ts).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+  return `${fmt(weekStartPosix)} – ${fmt(weekStartPosix + 6 * 24 * 3_600_000)}`
 }
 
 function CalendarSkeleton() {

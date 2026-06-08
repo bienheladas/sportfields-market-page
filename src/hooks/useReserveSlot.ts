@@ -1,18 +1,22 @@
-// Tx: Reserve slot — Available → Confirmed + mint Rent NFT to customer.
+// Tx: Reserve slot (INSERT) — create Node(Pending) in sorted linked list.
+// Spends predecessor with InsertPrev { new_next: Key(slotId) }.
+// If predecessor is a Node (not Head), Head must be in reference_inputs.
 
 import { useState } from 'react'
-import { Data, Constr, applyParamsToScript, fromText } from '@lucid-evolution/lucid'
+import { Data, Constr, applyParamsToScript } from '@lucid-evolution/lucid'
 import { useLucid } from '../lib/LucidContext'
 import {
   RENT_VALIDATOR_ADDR,
   RENT_NFT_POLICY,
-  COMPANY_PKH,
   OWNER_NFT_POLICY,
+  COMPANY_PKH,
   RENT_SPEND_COMPILED,
   RENT_MINT_COMPILED,
 } from '../lib/config'
+import { decodeRentDatum, decodeListHeadDatum } from '../lib/decoders'
 import { unwrapSubmitError } from '../lib/unwrapSubmitError'
-import type { RentSlotUtxoLike } from '../components/WeekCalendar'
+import type { ListHeadUtxo } from './useRentSlots'
+import type { NodeKey } from '../components/types'
 
 const appliedRentSpend = applyParamsToScript(RENT_SPEND_COMPILED, [
   new Constr(0, [OWNER_NFT_POLICY, RENT_NFT_POLICY])
@@ -21,94 +25,157 @@ const appliedRentMint = applyParamsToScript(RENT_MINT_COMPILED, [
   new Constr(0, [COMPANY_PKH])
 ])
 
-function isoYearWeek(dateMs: number): { year: number; week: number } {
-  const d = new Date(dateMs)
-  d.setUTCHours(0, 0, 0, 0)
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7))
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
-  const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7)
-  return { year: d.getUTCFullYear(), week }
+function nodeKeyConstr(nk: NodeKey): Constr<Data> {
+  return nk.tag === 'Empty' ? new Constr(1, []) : new Constr(0, [BigInt(nk.key)])
+}
+
+function rebuildPredDatum(rawDatum: string, newNextConstr: Constr<Data>): string {
+  const outer = Data.from(rawDatum) as Constr<Data>
+  const inner = outer.fields[0] as Constr<Data>
+  const nextIdx = Number(outer.index) === 0 ? 11 : 20  // Head: 12 fields, next@11; Node: 21 fields, next@20
+  const newFields = [...inner.fields]
+  newFields[nextIdx] = newNextConstr
+  return Data.to(new Constr(Number(outer.index), [new Constr(Number(inner.index), newFields)]))
 }
 
 export function useReserveSlot() {
-  const { lucid, pkh: customerPkh, address: customerAddr } = useLucid()
+  const { lucid, pkh: customerPkh } = useLucid()
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
 
-  const reserve = async (slot: RentSlotUtxoLike): Promise<string> => {
+  const reserve = async (headParam: ListHeadUtxo, slotId: number): Promise<string> => {
     if (!lucid) throw new Error('Wallet no conectada')
 
     setLoading(true)
     setError(null)
 
     try {
-      const datum = slot.datum
-
-      // ── Fetch fresh UTxO from chain (has address + inline datum) ──
+      // Fetch fresh UTxOs
       const allUtxos = await lucid.utxosAt(RENT_VALIDATOR_ADDR)
-      const slotUtxo = allUtxos.find(u => u.txHash === slot.txHash && u.outputIndex === slot.outputIndex)
-      if (!slotUtxo) throw new Error('Slot UTxO no encontrado en la cadena')
-      if (!slotUtxo.datum) throw new Error('Slot UTxO sin datum inline')
 
-      // ── Token name: "{year}-W{week}-S{slotId}" ────────────────────
-      const { year, week } = isoYearWeek(datum.slotStart)
-      const tokenNameStr   = `${year}-W${week}-S${datum.slotId}`
-      const tokenNameHex   = fromText(tokenNameStr)
-      if (tokenNameHex.length / 2 > 32) throw new Error(`Token name too long: ${tokenNameStr}`)
-      const tokenUnit      = RENT_NFT_POLICY + tokenNameHex
+      // Locate head UTxO on-chain
+      const headUtxo = allUtxos.find(u =>
+        u.txHash === headParam.txHash && u.outputIndex === headParam.outputIndex
+      )
+      if (!headUtxo || !headUtxo.datum) throw new Error('Head UTxO no encontrado en la cadena')
 
-      // ── Redeemers ─────────────────────────────────────────────────
-      // Reserve { customer_pkh } = Constr 0 [pkh]
-      const spendRedeemer = Data.to(new Constr(0, [customerPkh]))
-      // MintRentNFT { customer_pkh } = Constr 0 [pkh]
-      const mintRedeemer  = Data.to(new Constr(0, [customerPkh]))
+      const headDatum = decodeListHeadDatum(headUtxo.datum)
+      if (!headDatum.config.openSlotIds.includes(slotId))
+        throw new Error(`Slot ${slotId} no está en open_slot_ids del head`)
 
-      // ── Confirmed datum ────────────────────────────────────────────
-      const updatedDatum = Data.to(new Constr(0, [
-        BigInt(datum.slotId),
-        BigInt(datum.slotStart),
-        BigInt(datum.slotEnd),
-        BigInt(datum.cancelDeadline),
-        datum.rentPrice,
-        BigInt(datum.siteCommissionBps),
-        datum.ownerNFTName,
-        datum.ownerPkh,
-        datum.companyPkh,
-        new Constr(2, []),                        // status = Confirmed
-        new Constr(0, [customerPkh]),             // customerPkh = Some(pkh)
-        new Constr(0, [tokenNameHex]),            // rentNFTName = Some(name)
-        new Constr(1, []),                        // disputeDeposit = None
-        datum.fieldName,
-        datum.fieldAddress,
-        datum.phone,
-        datum.email,
-        datum.lat,
-        datum.long,
-        datum.paymentAddress,
-      ]))
+      // Parse all Node UTxOs for this owner
+      type NodeInfo = { utxo: typeof headUtxo; slotId: number; rawNext: NodeKey; rawDatum: string }
+      const nodes: NodeInfo[] = []
+      for (const u of allUtxos) {
+        if (!u.datum) continue
+        if (u.txHash === headUtxo.txHash && u.outputIndex === headUtxo.outputIndex) continue
+        try {
+          const d = decodeRentDatum(u.datum)
+          if (d && d.ownerNFTName === headDatum.ownerNFTName) {
+            nodes.push({ utxo: u, slotId: d.slotId, rawNext: d.next, rawDatum: u.datum })
+          }
+        } catch { /* skip malformed */ }
+      }
+      nodes.sort((a, b) => a.slotId - b.slotId)
 
-      // Continuing = current lovelace + rentPrice
-      const continuingLovelace = slotUtxo.assets.lovelace + datum.rentPrice
+      // Find predecessor: last node with slotId < target (or head if none)
+      let predUtxo = headUtxo
+      let predNext: NodeKey = headDatum.next
+      let predIsHead = true
+      let predRawDatum = headUtxo.datum
 
-      // ── ValidTo: avoid TimeTranslationPastHorizon ────────────────
-      const validToMs = Math.min(Date.now() + 10 * 60_000, datum.slotEnd - 1)
+      for (const node of nodes) {
+        if (node.slotId < slotId) {
+          predUtxo    = node.utxo
+          predNext    = node.rawNext
+          predIsHead  = false
+          predRawDatum = node.rawDatum
+        } else {
+          break
+        }
+      }
 
-      const tx = await lucid.newTx()
-        .collectFrom([slotUtxo], spendRedeemer)
+      // Verify insertion point is valid (predNext should point past slotId or be Empty)
+      if (predNext.tag === 'Key' && predNext.key <= slotId)
+        throw new Error(`Slot ${slotId} ya existe o la lista está desincronizada`)
+
+      // Compute slot times from head WeekConfig
+      const cfg = headDatum.config
+      const slotStart      = cfg.weekStartPosix + (slotId - 1) * cfg.slotDurationMs
+      const slotEnd        = slotStart + cfg.slotDurationMs
+      const cancelDeadline = slotStart - cfg.cancelDeadlineOffsetMs
+      const weekEnd        = cfg.weekStartPosix + 7 * 24 * 3_600_000
+
+      // Rent NFT name: first 4 bytes of ownerNFTName + customerPkh (32 bytes total)
+      const rentNFTName = headDatum.ownerNFTName.slice(0, 8) + customerPkh
+      const rentNFTUnit = RENT_NFT_POLICY + rentNFTName
+
+      // New node's next = predecessor's old next
+      const slotNextConstr = nodeKeyConstr(predNext)
+
+      // Build new Node datum: SlotDatum::Node(RentDatum) — status Confirmed (skipping ConfirmRent)
+      const newNodeDatum = Data.to(new Constr(1, [new Constr(0, [
+        BigInt(slotId),
+        BigInt(slotStart),
+        BigInt(slotEnd),
+        BigInt(cancelDeadline),
+        cfg.rentPrice,
+        BigInt(cfg.siteCommissionBps),
+        headDatum.ownerNFTName,
+        headDatum.ownerPkh,
+        headDatum.companyPkh,
+        new Constr(2, []),                          // status = Confirmed
+        new Constr(0, [customerPkh]),               // customerPkh = Some(customerPkh)
+        new Constr(0, [rentNFTName]),               // rentNFTName = Some(rentNFTName)
+        new Constr(1, []),                          // disputeDeposit = None
+        headDatum.fieldName,
+        headDatum.fieldAddress,
+        headDatum.phone,
+        headDatum.email,
+        headDatum.lat,
+        headDatum.long,
+        headDatum.paymentAddress,
+        slotNextConstr,                             // next = pred's old next
+        BigInt(weekEnd),                            // week_end
+        BigInt(cfg.loyaltyNftsRequired),            // loyalty_nfts_required
+      ])]))
+
+      // Predecessor continues with next = Key(slotId)
+      const newPredDatum = rebuildPredDatum(predRawDatum, new Constr(0, [BigInt(slotId)]))
+
+      // Redeemers
+      const insertRedeemer = Data.to(new Constr(7, [new Constr(0, [BigInt(slotId)])]))  // InsertPrev
+      const mintRedeemer   = Data.to(new Constr(0, [customerPkh]))                      // MintRentNFT
+
+      // validTo must be before slotStart - 60_000 (on-chain check_insert_prev).
+      // Also cap at Date.now() + 10min to avoid TimeTranslationPastHorizon.
+      const reserveDeadline = slotStart - 60_000
+
+      let txBuilder = lucid.newTx()
+        .collectFrom([predUtxo], insertRedeemer)
         .attach.SpendingValidator({ type: 'PlutusV3', script: appliedRentSpend })
-        .mintAssets({ [tokenUnit]: 1n }, mintRedeemer)
+        .mintAssets({ [rentNFTUnit]: 1n }, mintRedeemer)
         .attach.MintingPolicy({ type: 'PlutusV3', script: appliedRentMint })
         .pay.ToContract(
           RENT_VALIDATOR_ADDR,
-          { kind: 'inline', value: updatedDatum },
-          { lovelace: continuingLovelace },
+          { kind: 'inline', value: newPredDatum },
+          { lovelace: predUtxo.assets.lovelace },
         )
-        .pay.ToAddress(customerAddr, { lovelace: 2_000_000n, [tokenUnit]: 1n })
+        .pay.ToContract(
+          RENT_VALIDATOR_ADDR,
+          { kind: 'inline', value: newNodeDatum },
+          { lovelace: cfg.rentPrice, [rentNFTUnit]: 1n },
+        )
         .addSignerKey(customerPkh)
-        .validTo(validToMs)
-        .complete()
+        .validTo(Math.min(reserveDeadline - 1, Date.now() + 10 * 60_000))
 
-      const signed  = await tx.sign.withWallet().complete()
+      // If pred is a Node, head must be a reference input (for WeekConfig validation)
+      if (!predIsHead) {
+        txBuilder = txBuilder.readFrom([headUtxo])
+      }
+
+      const tx     = await txBuilder.complete()
+      const signed = await tx.sign.withWallet().complete()
       return await signed.submit()
     } catch (e: unknown) {
       const msg = unwrapSubmitError(e)
