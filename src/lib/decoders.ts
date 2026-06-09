@@ -61,6 +61,21 @@ function decodeCbor(buf: Uint8Array, offset: number): [CborValue, number] {
     return [-1n - n, o]
   }
   if (major === 2) { // bytes
+    if (info === 31) { // indefinite-length bytes: concatenate chunks until 0xff break
+      let cur = offset
+      const chunks: Uint8Array[] = []
+      while (buf[cur] !== 0xff) {
+        const [chunk, next] = decodeCbor(buf, cur)
+        if (!(chunk instanceof Uint8Array)) throw new Error('Expected bytes chunk in indefinite bytes')
+        chunks.push(chunk)
+        cur = next
+      }
+      const total = chunks.reduce((n, c) => n + c.length, 0)
+      const result = new Uint8Array(total)
+      let pos = 0
+      for (const c of chunks) { result.set(c, pos); pos += c.length }
+      return [result, cur + 1]
+    }
     const [len, o] = readUint(info)
     const end = o + Number(len)
     return [buf.slice(o, end), end]

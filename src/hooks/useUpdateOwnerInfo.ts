@@ -51,7 +51,7 @@ export function useUpdateOwnerInfo() {
 
       // G: find this field's NFT in owner's wallet
       const walletAddr = await lucid.wallet().address()
-      const walletUtxos = await lucid.utxosAt(walletAddr)
+      const walletUtxos = await lucid.wallet().getUtxos()
       const nftWalletUtxo = walletUtxos.find(u => (u.assets[fieldNftUnit] ?? 0n) >= 1n)
       if (!nftWalletUtxo) throw new Error('Owner NFT no encontrado en tu wallet')
 

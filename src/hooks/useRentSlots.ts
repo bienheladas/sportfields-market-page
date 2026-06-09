@@ -51,6 +51,7 @@ export function useRentSlots(ownerNFTNameHex?: string, ownerPkhHex?: string) {
               })
             } else {
               if (ownerNFTNameHex && datum.ownerNFTName !== ownerNFTNameHex) continue
+              if (!ownerNFTNameHex && ownerPkhHex && datum.ownerPkh !== ownerPkhHex) continue
               parsedSlots.push({
                 txHash: u.tx_hash, outputIndex: u.output_index, datum, lovelace,
                 address: RENT_VALIDATOR_ADDR, rawDatum: u.inline_datum,

@@ -3,6 +3,7 @@ import { useLucid } from '../lib/LucidContext'
 import { useOwnerFields } from '../hooks/useOwnerFields'
 import { useRentSlots } from '../hooks/useRentSlots'
 import { useCollectSlot } from '../hooks/useCollectSlot'
+import { useDeinitWeek } from '../hooks/useDeinitWeek'
 import { useUpdateOwnerInfo } from '../hooks/useUpdateOwnerInfo'
 import { OwnerRecordCard } from '../components/OwnerRecordCard'
 import { decodeBBS, formatAda } from '../components/lib'
@@ -24,10 +25,14 @@ function WeekCard({
   week,
   onCollect,
   collecting,
+  onDeinit,
+  deiniting,
 }: {
   week: WeekView
   onCollect: (slot: RentSlotUtxo) => void
   collecting: boolean
+  onDeinit: (head: ListHeadUtxo) => void
+  deiniting: boolean
 }) {
   const [open, setOpen] = React.useState(true)
   const { config } = week.head.datum
@@ -88,6 +93,18 @@ function WeekCard({
               )}
             </div>
           ))}
+          {week.head.datum.next.tag === 'Empty' && (
+            <div className="mt-1 pt-2 border-t border-[var(--line)]">
+              <button
+                type="button"
+                disabled={deiniting}
+                onClick={() => onDeinit(week.head)}
+                className="px-3 py-1.5 rounded-[8px] text-xs font-semibold border border-[var(--line-strong)] text-[var(--muted)] hover:border-[var(--rose-ink)] hover:text-[var(--rose-ink)] disabled:opacity-40"
+              >
+                {deiniting ? 'Cerrando…' : 'Cerrar semana'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -101,7 +118,7 @@ export default function OwnerPanel() {
   const [selectedIdx, setSelectedIdx] = React.useState(0)
   const selectedField = ownerFields[selectedIdx] ?? null
 
-  const { slots, heads, loading: loadingSlots, reload: reloadSlots } = useRentSlots(selectedField?.ownerNFTName, ownerPkh ?? undefined)
+  const { slots, heads, loading: loadingSlots, reload: reloadSlots } = useRentSlots(undefined, ownerPkh ?? undefined)
 
   const reload = React.useCallback(() => {
     reloadFields()
@@ -113,6 +130,9 @@ export default function OwnerPanel() {
 
   const { collectSlot, loading: collecting, error: collectError } = useCollectSlot()
   const [collectTxHash, setCollectTxHash] = React.useState<string | null>(null)
+
+  const { deinitWeek, loading: deiniting, error: deinitError } = useDeinitWeek()
+  const [deinitTxHash, setDeinitTxHash] = React.useState<string | null>(null)
 
   const { updateOwnerInfo, loading: updatingInfo, error: updateInfoError } = useUpdateOwnerInfo()
   const [updateTxHash, setUpdateTxHash] = React.useState<string | null>(null)
@@ -141,11 +161,13 @@ export default function OwnerPanel() {
   const record = selectedField.record
   const completedSlots = slots.filter(s => s.datum.status === 'Completed' && s.datum.fieldName === record.fieldName)
 
-  // Filter heads to this specific field (ownerNFTName + fieldName) so that
-  // multiple fields registered under the same owner don't bleed into each other.
+  // A head belongs to this field if:
+  // (a) its ownerNFTName matches exactly — covers heads created after a rename, OR
+  // (b) ownerPkh matches AND fieldName matches — covers heads created with a
+  //     different registration's ownerNFTName but the same field name.
   const fieldHeads = heads.filter(h =>
-    h.datum.ownerNFTName === selectedField.ownerNFTName &&
-    h.datum.fieldName === record.fieldName
+    h.datum.ownerNFTName === selectedField.ownerNFTName ||
+    (h.datum.ownerPkh === record.ownerPkh && h.datum.fieldName === record.fieldName)
   )
 
   const weeks: WeekView[] = fieldHeads
@@ -174,6 +196,14 @@ export default function OwnerPanel() {
   const handleCollectNext = () => {
     const next = completedSlots[0]
     if (next) handleCollect(next)
+  }
+
+  const handleDeinit = async (head: ListHeadUtxo) => {
+    try {
+      const txHash = await deinitWeek(head)
+      setDeinitTxHash(txHash)
+      setTimeout(() => reload(), 3_000)
+    } catch { /* error shown in deinitError */ }
   }
 
   const handleUpdateInfo = async (patch: MutableOwnerFields) => {
@@ -256,6 +286,18 @@ export default function OwnerPanel() {
         </div>
       )}
 
+      {deinitError && (
+        <div className="px-4 py-3 rounded-[10px] bg-[var(--rose-bg)] border border-[#ecb5ac] text-[var(--rose-ink)] text-sm">
+          Error al cerrar semana: {deinitError}
+        </div>
+      )}
+      {deinitTxHash && (
+        <div className="px-4 py-3 rounded-[10px] bg-[var(--mint-bg)] border border-[#b9d8c1] text-[#244d33] text-sm flex items-center justify-between">
+          <span>¡Semana cerrada! Tx: <span className="font-mono">{deinitTxHash.slice(0, 12)}…</span></span>
+          <button onClick={() => setDeinitTxHash(null)} className="text-[var(--muted)] hover:text-[var(--ink)] ml-2">✕</button>
+        </div>
+      )}
+
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-[18px] font-semibold">Semanas programadas</h2>
@@ -281,6 +323,8 @@ export default function OwnerPanel() {
               week={w}
               onCollect={handleCollect}
               collecting={collecting}
+              onDeinit={handleDeinit}
+              deiniting={deiniting}
             />
           ))}
           {orphanSlots.length > 0 && (
