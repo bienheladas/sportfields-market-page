@@ -7,6 +7,7 @@ import FieldDetail from './pages/FieldDetail'
 import OwnerPanel from './pages/OwnerPanel'
 import MyBookings from './pages/MyBookings'
 import RegisterOwner from './pages/RegisterOwner'
+import CompanyPanel from './pages/CompanyPanel'
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
             <Route path="/register"                   element={<RegisterOwner />} />
             <Route path="/owner"                     element={<OwnerPanel />} />
             <Route path="/bookings"                  element={<MyBookings />} />
+            <Route path="/company"                   element={<CompanyPanel />} />
           </Routes>
         </div>
       </BrowserRouter>

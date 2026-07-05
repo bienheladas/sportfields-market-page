@@ -1,8 +1,12 @@
 import * as React from 'react'
+import { useLucid } from '../lib/LucidContext'
 import { useCancelRent } from '../hooks/useCancelRent'
+import { useConfirmRent } from '../hooks/useConfirmRent'
 import { useOpenDispute } from '../hooks/useOpenDispute'
 import { useRedeemAtField } from '../hooks/useRedeemAtField'
-import { decodeBBS, formatAda, formatPosixDateTime, shortenAddr } from './lib'
+import { useRedeemFree, loyaltyNftUnit } from '../hooks/useRedeemFree'
+import { decodeBBS, formatAda, shortenAddr } from './lib'
+import { useOwnerRecord } from '../hooks/useOwnerRecord'
 import type { RentSlotUtxo } from '../hooks/useRentSlots'
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -44,22 +48,22 @@ function FieldThumb() {
 
 function StatusPill({ status }: { status: string }) {
   const styles: Record<string, string> = {
+    Pending:   'bg-amber-50 text-amber-700',
     Confirmed: 'bg-[var(--mint-bg)] text-[var(--mint-ink)]',
     Disputed:  'bg-[var(--rose-bg)] text-[var(--rose-ink)]',
     Completed: 'bg-[var(--slate-bg)] text-[var(--slate-ink)]',
-    Refunded:  'bg-[var(--paper-2)] text-[var(--muted)]',
   }
   const labels: Record<string, string> = {
+    Pending:   'Pendiente de confirmar',
     Confirmed: 'Confirmado',
     Disputed:  'En disputa',
     Completed: 'Jugado',
-    Refunded:  'Reembolsado',
   }
   const dotColors: Record<string, string> = {
+    Pending:   'bg-amber-600',
     Confirmed: 'bg-[var(--mint-ink)]',
     Disputed:  'bg-[var(--rose-ink)]',
     Completed: 'bg-[var(--slate-ink)]',
-    Refunded:  'bg-[var(--muted)]',
   }
   const cls = styles[status] ?? 'bg-[var(--paper-2)] text-[var(--muted)]'
   const dot = dotColors[status] ?? 'bg-[var(--muted)]'
@@ -74,6 +78,7 @@ function StatusPill({ status }: { status: string }) {
 // ── Escrow label ───────────────────────────────────────────────────────
 
 function escrowLabel(status: string): string {
+  if (status === 'Pending')   return 'depósito 50%'
   if (status === 'Confirmed') return 'en escrow'
   if (status === 'Disputed')  return 'en disputa'
   if (status === 'Completed') return 'liberado'
@@ -107,25 +112,40 @@ function SummaryRow({ label, value }: { label: string; value: React.ReactNode })
 }
 
 // ── Date formatter ─────────────────────────────────────────────────────
+// Must format in the FIELD's own timezone (OwnerRecord.timezone), not UTC nor
+// the viewer's browser timezone — see lib/timezone.ts.
 
-function fmtDate(ms: number): string {
-  return new Date(ms).toLocaleString('es', { timeZone: 'UTC' })
+function fmtDateInZone(ms: number, timeZone: string): string {
+  return new Date(ms).toLocaleString('es', { timeZone })
 }
 
 // ── Main component ─────────────────────────────────────────────────────
 
 export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
+  const { lucid } = useLucid()
   const { cancel,        loading: loadingCancel,  error: errCancel  } = useCancelRent()
+  const { confirmRent,   loading: loadingConfirm, error: errConfirm } = useConfirmRent()
   const { openDispute,   loading: loadingDispute, error: errDispute } = useOpenDispute()
   const { redeemAtField, loading: loadingRedeem,  error: errRedeem  } = useRedeemAtField()
+  const { redeemFree,    loading: loadingFree,    error: errFree    } = useRedeemFree()
 
   const [showCancelModal,  setShowCancelModal]  = React.useState(false)
+  const [showConfirmModal, setShowConfirmModal] = React.useState(false)
   const [showDisputeModal, setShowDisputeModal] = React.useState(false)
   const [showRedeemModal,  setShowRedeemModal]  = React.useState(false)
+  const [showFreeModal,    setShowFreeModal]    = React.useState(false)
   const [txHash, setTxHash] = React.useState<string | null>(null)
+  const [loyaltyBalance, setLoyaltyBalance] = React.useState<bigint>(0n)
 
   const datum  = slot.datum
   const status = datum.status
+
+  // Slot times must display in the field's own timezone, not UTC/browser-local.
+  // Must look up by ownerNFTName, not ownerPkh — a wallet can own multiple
+  // fields, and web registrations mint ownerNFTName != ownerPkh — see useOwnerRecord.ts.
+  const { record: ownerRecord } = useOwnerRecord(datum.ownerNFTName)
+  const tz = ownerRecord?.timezone || 'UTC'
+  const fmtDate = (ms: number) => fmtDateInZone(ms, tz)
 
   const [now, setNow] = React.useState(Date.now())
   React.useEffect(() => {
@@ -133,8 +153,17 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
     return () => clearInterval(id)
   }, [])
 
-  const isLoading  = loadingCancel || loadingDispute || loadingRedeem
-  const anyError   = errCancel || errDispute || errRedeem
+  const isLoading  = loadingCancel || loadingConfirm || loadingDispute || loadingRedeem || loadingFree
+  const anyError   = errCancel || errConfirm || errDispute || errRedeem || errFree
+
+  React.useEffect(() => {
+    if (!lucid || status !== 'Confirmed') return
+    const unit = loyaltyNftUnit(datum.ownerNFTName, datum.customerPkh ?? '')
+    lucid.wallet().getUtxos()
+      .then(utxos => setLoyaltyBalance(utxos.reduce((sum, u) => sum + (u.assets[unit] ?? 0n), 0n)))
+      .catch(() => setLoyaltyBalance(0n))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lucid, status, datum.ownerNFTName, datum.customerPkh])
 
   // ── Derived display values ─────────────────────────────────────────
   const fieldName    = decodeBBS(datum.fieldName)
@@ -148,13 +177,26 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
   const isActiveNow = now >= datum.slotStart && now <= datum.slotEnd
 
   // ── Action visibility logic ────────────────────────────────────────
-  const canCancel       = status === 'Confirmed'
+  const canConfirm      = status === 'Pending'
+  const remaining       = datum.rentPrice > slot.lovelace ? datum.rentPrice - slot.lovelace : 0n
+  const canCancel       = status === 'Confirmed' || status === 'Pending'
   const cancelDeadlineOk = now < datum.cancelDeadline
   const canRedeem       = status === 'Confirmed'
-  const redeemEnabled   = now >= datum.slotStart
+  const redeemWindowOpensAt = datum.slotStart - 15 * 60_000  // on-chain: after(slot_start - 900_000)
+  const redeemEnabled   = now >= redeemWindowOpensAt
   const canDispute      = status === 'Confirmed' && now > datum.cancelDeadline
+  const canRedeemFree   = status === 'Confirmed' && loyaltyBalance >= BigInt(datum.loyaltyNftsRequired)
 
   // ── Handlers ──────────────────────────────────────────────────────
+  const handleConfirm = async () => {
+    try {
+      const hash = await confirmRent(slot)
+      setShowConfirmModal(false)
+      setTxHash(hash)
+      setTimeout(() => onActionDone(), 3_000)
+    } catch { /* error shown inline */ }
+  }
+
   const handleCancel = async () => {
     try {
       const hash = await cancel(slot)
@@ -177,6 +219,15 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
     try {
       const hash = await redeemAtField(slot)
       setShowRedeemModal(false)
+      setTxHash(hash)
+      setTimeout(() => onActionDone(), 3_000)
+    } catch { /* error shown inline */ }
+  }
+
+  const handleRedeemFree = async () => {
+    try {
+      const hash = await redeemFree(slot)
+      setShowFreeModal(false)
       setTxHash(hash)
       setTimeout(() => onActionDone(), 3_000)
     } catch { /* error shown inline */ }
@@ -247,6 +298,17 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
           {/* Right: action buttons */}
           <div className="flex flex-wrap gap-2">
 
+            {/* Confirm (Pending → Confirmed) */}
+            {canConfirm && (
+              <button
+                disabled={isLoading}
+                onClick={() => setShowConfirmModal(true)}
+                className="px-3 py-1.5 rounded-[8px] text-xs font-semibold border border-[var(--accent)] text-[var(--accent-deep)] bg-[var(--accent-soft)] hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+              >
+                {loadingConfirm ? 'Confirmando…' : `Confirmar y pagar ${formatAda(remaining)}`}
+              </button>
+            )}
+
             {/* Cancel */}
             {canCancel && (
               <div className="relative group">
@@ -277,10 +339,21 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
                 </button>
                 {!redeemEnabled && (
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded bg-[var(--ink)] text-white text-[10px] whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10">
-                    Disponible desde {fmtDate(datum.slotStart)}
+                    Disponible desde {fmtDate(redeemWindowOpensAt)}
                   </div>
                 )}
               </div>
+            )}
+
+            {/* Redeem free (loyalty) */}
+            {canRedeemFree && (
+              <button
+                disabled={isLoading}
+                onClick={() => setShowFreeModal(true)}
+                className="px-3 py-1.5 rounded-[8px] text-xs font-semibold border border-[var(--accent)] text-[var(--accent-deep)] bg-[var(--accent-soft)] hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+              >
+                {loadingFree ? 'Canjeando…' : 'Canjear gratis (lealtad)'}
+              </button>
             )}
 
             {/* Open dispute */}
@@ -329,6 +402,98 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
           </div>
         )}
       </div>
+
+      {/* ── Confirm Modal ──────────────────────────────────────────── */}
+      {showConfirmModal && (
+        <Modal onClose={() => setShowConfirmModal(false)}>
+          <div className="p-5">
+            <div className="w-11 h-11 rounded-full bg-[var(--accent-soft)] flex items-center justify-center mx-auto mb-3">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M22 11.08V12a10 10 0 11-5.93-9.14" stroke="var(--accent-deep)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <polyline points="22 4 12 14.01 9 11.01" stroke="var(--accent-deep)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <h2 className="text-center font-bold text-[var(--ink)] mb-1">Confirmar reserva</h2>
+            <p className="text-center text-xs text-[var(--muted)] mb-4">
+              Pagás el {formatAda(remaining)} restante y se acuña tu Rent NFT. El slot pasa a Confirmado.
+            </p>
+
+            <div className="rounded-xl border border-[var(--line)] p-3 mb-4 space-y-0">
+              <SummaryRow label="Cancha"          value={fieldName} />
+              <SummaryRow label="Horario"         value={`${fmtDate(datum.slotStart)} → ${fmtDate(datum.slotEnd)}`} />
+              <SummaryRow label="Ya depositado"   value={formatAda(slot.lovelace)} />
+              <SummaryRow label="Restante a pagar" value={formatAda(remaining)} />
+              <SummaryRow label="Redeemer"        value="Constr 0 · ConfirmRent" />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                disabled={loadingConfirm}
+                className="flex-1 py-2.5 rounded-[10px] border border-[var(--line)] text-sm font-semibold text-[var(--ink-2)] hover:border-[var(--line-strong)] disabled:opacity-40"
+              >
+                Volver
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={loadingConfirm}
+                className="flex-1 py-2.5 rounded-[10px] bg-[var(--accent)] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {loadingConfirm && (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                )}
+                Firmar y pagar
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Redeem Free Modal (loyalty) ────────────────────────────── */}
+      {showFreeModal && (
+        <Modal onClose={() => setShowFreeModal(false)}>
+          <div className="p-5">
+            <div className="w-11 h-11 rounded-full bg-[var(--accent-soft)] flex items-center justify-center mx-auto mb-3">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M20 12v8H4v-8M2 7h20v5H2V7zM12 22V7M12 7H7.5a2.5 2.5 0 010-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 000-5C13 2 12 7 12 7z"
+                  stroke="var(--accent-deep)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <h2 className="text-center font-bold text-[var(--ink)] mb-1">Canjear slot gratis</h2>
+            <p className="text-center text-xs text-[var(--muted)] mb-4">
+              Se queman {datum.loyaltyNftsRequired} NFT(s) de lealtad de tu wallet + el NFT del contrato. Se te reembolsa el rent_price completo.
+            </p>
+
+            <div className="rounded-xl border border-[var(--line)] p-3 mb-4 space-y-0">
+              <SummaryRow label="Cancha"             value={fieldName} />
+              <SummaryRow label="Horario"            value={`${fmtDate(datum.slotStart)} → ${fmtDate(datum.slotEnd)}`} />
+              <SummaryRow label="NFTs de lealtad"    value={`${loyaltyBalance} / ${datum.loyaltyNftsRequired} requeridos`} />
+              <SummaryRow label="Reembolso"          value={formatAda(datum.rentPrice)} />
+              <SummaryRow label="Redeemer"           value="Constr 10 · RedeemFree" />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowFreeModal(false)}
+                disabled={loadingFree}
+                className="flex-1 py-2.5 rounded-[10px] border border-[var(--line)] text-sm font-semibold text-[var(--ink-2)] hover:border-[var(--line-strong)] disabled:opacity-40"
+              >
+                Volver
+              </button>
+              <button
+                onClick={handleRedeemFree}
+                disabled={loadingFree}
+                className="flex-1 py-2.5 rounded-[10px] bg-[var(--accent)] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {loadingFree && (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                )}
+                Firmar canje
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* ── Cancel Modal (Tx 6) ────────────────────────────────────── */}
       {showCancelModal && (

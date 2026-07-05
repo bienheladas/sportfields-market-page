@@ -47,25 +47,49 @@ const DAY_LABELS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export type Lang = 'es' | 'en';
 
-export function formatSlotRange(start: POSIXTime, end: POSIXTime, lang: Lang = 'es'): string {
-  const s = new Date(start);
-  const e = new Date(end);
+// Slot times are stored on-chain as POSIX ms (absolute UTC instants), but the
+// weekly schedule's hours are meant to represent the FIELD's local hours
+// (OwnerRecord.timezone, an IANA string — Mejora L). Every display helper here
+// takes an explicit `timeZone` (pass the field's, e.g. via record.timezone) so
+// what's shown matches what the owner configured ("abre a las 8am" = 8am local
+// to the field, not 8am UTC nor the viewer's browser timezone). Defaults to
+// 'UTC' only as a last-resort fallback when the field's timezone isn't known yet.
+export function formatSlotRange(start: POSIXTime, end: POSIXTime, lang: Lang = 'es', timeZone = 'UTC'): string {
+  const sParts = zonedDateParts(start, timeZone);
+  const eParts = zonedDateParts(end, timeZone);
   const days = lang === 'es' ? DAY_LABELS_ES : DAY_LABELS_EN;
-  const day = days[(s.getDay() + 6) % 7]; // make Monday index 0
-  const hs = String(s.getHours()).padStart(2, '0');
-  const he = String(e.getHours()).padStart(2, '0');
-  return `${day} ${s.getDate()} · ${hs}:00–${he}:00`;
+  const day = days[sParts.weekdayIndex];
+  const hs = String(sParts.hour).padStart(2, '0');
+  const he = String(eParts.hour).padStart(2, '0');
+  return `${day} ${sParts.day} · ${hs}:00–${he}:00`;
 }
 
-export function formatPosixDateTime(t: POSIXTime, lang: Lang = 'es'): string {
+export function formatPosixDateTime(t: POSIXTime, lang: Lang = 'es', timeZone = 'UTC'): string {
   const d = new Date(t);
   return d.toLocaleString(lang === 'es' ? 'es-AR' : 'en-US', {
+    timeZone,
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+const WEEKDAY_INDEX_EN: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+
+function zonedDateParts(ms: number, timeZone: string): { weekdayIndex: number; day: number; hour: number } {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23',
+    weekday: 'short', day: '2-digit', hour: '2-digit',
+  });
+  const map: Record<string, string> = {};
+  for (const p of dtf.formatToParts(new Date(ms))) map[p.type] = p.value;
+  return {
+    weekdayIndex: WEEKDAY_INDEX_EN[map.weekday] ?? 0,
+    day: Number(map.day),
+    hour: Number(map.hour) % 24,
+  };
 }
 
 // ───────────────────────────────────────────────────────────────────
@@ -110,7 +134,14 @@ export function shortenAddr(addr: PubKeyHash | string, head = 8, tail = 4): stri
 
 /** Decode a hex TokenName to UTF-8 if it round-trips cleanly; otherwise return as-is. */
 export function decodeTokenName(tn: TokenName): string {
-  // Best effort — TokenName may be raw hex bytes. If looks like ASCII-only after decoding, use it.
+  // Best effort — TokenName may be raw hex bytes. If it decodes to valid UTF-8
+  // text without control-character garbage, use it. The old check restricted
+  // this to plain ASCII (\x20-\x7E), which silently rejected perfectly valid
+  // names with accented letters (á, é, í, ó, ú, ñ) — e.g. "El Bernabéu Campo
+  // Deportivo" decoded fine but failed the ASCII-only test and fell back to
+  // showing the raw hex. Unicode printable text is accepted now; only
+  // strings containing actual control bytes (a sign this isn't real text,
+  // e.g. a raw PKH/policy ID) fall back to hex.
   if (/^[0-9a-fA-F]+$/.test(tn) && tn.length % 2 === 0) {
     try {
       const bytes = new Uint8Array(tn.length / 2);
@@ -118,7 +149,7 @@ export function decodeTokenName(tn: TokenName): string {
         bytes[i] = parseInt(tn.slice(i * 2, i * 2 + 2), 16);
       }
       const decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-      if (/^[\x20-\x7E]+$/.test(decoded)) return decoded;
+      if (!/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(decoded)) return decoded;
     } catch {
       /* fallthrough */
     }

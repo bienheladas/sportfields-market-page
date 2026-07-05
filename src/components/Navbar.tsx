@@ -1,10 +1,12 @@
 import * as React from 'react'
 import { NavLink } from 'react-router-dom'
 import { useLucid } from '../lib/LucidContext'
+import { COMPANY_PKH } from '../lib/config'
 import { WalletButton } from './WalletButton'
 
 export function Navbar() {
-  const { connected } = useLucid()
+  const { connected, pkh } = useLucid()
+  const isCompany = connected && pkh === COMPANY_PKH
 
   return (
     <header className="sticky top-0 z-40 bg-[rgba(248,244,236,0.85)] backdrop-blur-md border-b border-[var(--line)]">
@@ -15,6 +17,7 @@ export function Navbar() {
           <NavItem to="/" end>Canchas</NavItem>
           {connected && <NavItem to="/bookings">Mis reservas</NavItem>}
           {connected && <NavItem to="/owner">Mi panel</NavItem>}
+          {isCompany && <NavItem to="/company">Company</NavItem>}
         </nav>
 
         <div className="flex-1" />

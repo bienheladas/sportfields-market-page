@@ -66,6 +66,7 @@ function makeAvailableSlot(h: ListHeadDatum, slotId: number): RentSlotUtxoLike {
       next: { tag: 'Empty' },
       weekEnd: cfg.weekStartPosix + 7 * 24 * 3_600_000,
       loyaltyNftsRequired: cfg.loyaltyNftsRequired ?? 5,
+      guaranteePerSlot: cfg.guaranteePerSlot ?? 0n,
     },
   }
 }
@@ -290,8 +291,6 @@ const STATUS_CLASSES: Record<SlotStatus, string> = {
     'bg-[#ccfbf1] text-[#0f766e]',
   Disputed:
     'bg-[var(--rose-bg)] text-[var(--rose-ink,#6f2920)]',
-  Refunded:
-    'bg-[var(--paper-2)] text-[var(--muted)]',
 }
 
 // ───────────────────────────────────────────────────────────────────

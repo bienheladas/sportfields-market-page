@@ -59,7 +59,7 @@ export function useUpdateOwnerInfo() {
       const raw = Data.from(ownerStatsRaw.inline_datum) as Constr<Data>
       const innerRecord = raw.fields[0] as Constr<Data>
 
-      // Rebuild preserving all fields; only replace indices 6-12 (mutable profile)
+      // Rebuild preserving all fields; only replace indices 6-12 (mutable profile) + 15 (timezone)
       const fields = [...innerRecord.fields]
       fields[6]  = fromText(patch.fieldName)
       fields[7]  = fromText(patch.address)
@@ -68,6 +68,7 @@ export function useUpdateOwnerInfo() {
       fields[10] = fromText(patch.lat)
       fields[11] = fromText(patch.long)
       fields[12] = fromText(patch.paymentAddress)
+      fields[15] = fromText(patch.timezone)
       // field 13 (guaranteePerSlot) preserved as-is from innerRecord.fields[13]
 
       const updatedDatum = Data.to(

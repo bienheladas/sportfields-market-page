@@ -5,6 +5,7 @@ import { useLucid } from '../lib/LucidContext';
 import { useRegisterOwner, type RegisterOwnerFields } from '../hooks/useRegisterOwner';
 import { useOwnerFields } from '../hooks/useOwnerFields';
 import { WalletModal } from '../components/WalletModal';
+import { timezoneFromLatLong } from '../lib/timezone';
 
 const LIMITS = { fieldName: 64, fieldAddress: 64, phone: 32, email: 64 } as const;
 const LATLONG_RE = /^-?\d+\.\d+$/;
@@ -17,6 +18,7 @@ const INITIAL_FIELDS: RegisterOwnerFields = {
   email: '',
   lat: '',
   long_: '',
+  timezone: '',  // derivado de lat/long, no del navegador — ver FormStep
 };
 
 type Step = 'form' | 'preview' | 'success';
@@ -192,8 +194,20 @@ function FormStep({
   connected: boolean;
   onConnectWallet: () => void;
 }) {
-  const set = <K extends keyof RegisterOwnerFields>(k: K, v: string) =>
-    onChange({ ...fields, [k]: v });
+  // timezone se deriva de lat/long, no se pide a mano — pedirlo manualmente
+  // llevó a que quedara con el timezone del navegador de quien registró
+  // (Intl.DateTimeFormat().resolvedOptions().timeZone), sin relación con la
+  // ubicación real de la cancha. Se recalcula en el propio setter de lat/long,
+  // no en un efecto, para no desincronizarse del valor recién tipeado.
+  const set = <K extends keyof RegisterOwnerFields>(k: K, v: string) => {
+    const next = { ...fields, [k]: v };
+    if (k === 'lat' || k === 'long_') {
+      next.timezone = LATLONG_RE.test(next.lat) && LATLONG_RE.test(next.long_)
+        ? timezoneFromLatLong(parseFloat(next.lat), parseFloat(next.long_))
+        : '';
+    }
+    onChange(next);
+  };
 
   const valid = isFormValid(fields);
 
@@ -268,6 +282,17 @@ function FormStep({
             error={fields.long_ !== '' && !LATLONG_RE.test(fields.long_) ? 'Formato inválido' : null}
           />
         </div>
+        <div className="flex flex-col gap-1.5 mb-3.5">
+          <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--muted)] font-semibold">
+            Zona horaria (derivada de lat/long)
+          </span>
+          <div className="px-3 py-2 rounded-[8px] border border-dashed border-[var(--line-strong)] bg-[var(--paper-2)] text-[13px] font-mono text-[var(--ink-2)]">
+            {fields.timezone || 'Ingresá latitud y longitud válidas'}
+          </div>
+          <span className="text-[11px] text-[var(--muted)]">
+            Se calcula automáticamente de las coordenadas — define la hora local de tu horario semanal (init-week).
+          </span>
+        </div>
 
         <Banner tone="mint" className="mt-2">
           Tu Owner NFT (token name = PKH de tu wallet) prueba la propiedad de la cancha. Solo tú puedes actualizar estos datos después con <strong>Tx 10</strong>.
@@ -334,6 +359,7 @@ function PreviewStep({
           <SummaryRow k="Teléfono" v={fields.phone} mono />
           <SummaryRow k="Email" v={fields.email} mono />
           <SummaryRow k="Coordenadas" v={`${fields.lat}, ${fields.long_}`} mono />
+          <SummaryRow k="Zona horaria" v={fields.timezone} mono />
           <SummaryRow k="Owner NFT" v="policyId + PKH (28 B token name)" mono />
         </div>
       </div>
@@ -637,5 +663,6 @@ function isFormValid(f: RegisterOwnerFields): boolean {
   if (!f.email.trim() || utf8Bytes(f.email) > LIMITS.email) return false;
   if (!LATLONG_RE.test(f.lat)) return false;
   if (!LATLONG_RE.test(f.long_)) return false;
+  if (!f.timezone.trim()) return false;
   return true;
 }

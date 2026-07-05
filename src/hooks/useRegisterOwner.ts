@@ -12,10 +12,22 @@ import {
 } from '../lib/config'
 import { unwrapSubmitError } from '../lib/unwrapSubmitError'
 
+// Cardano tx metadata caps each string chunk at 64 UTF-8 *bytes*, not JS string
+// length (UTF-16 code units) — a chunk of 64 *characters* containing accented
+// letters (á, é, í, ó, ú, ñ — 2 bytes each in UTF-8) can silently encode to 65+
+// bytes and fail with "Deserialization: 65 not at most 64". Chunk by byte
+// length instead, backing off so a multi-byte character is never split in half.
 function metaStr(s: string): string | string[] {
-  if (s.length <= 64) return s
+  const bytes = new TextEncoder().encode(s)
+  if (bytes.length <= 64) return s
   const chunks: string[] = []
-  for (let i = 0; i < s.length; i += 64) chunks.push(s.slice(i, i + 64))
+  let start = 0
+  while (start < bytes.length) {
+    let end = Math.min(start + 64, bytes.length)
+    while (end > start && (bytes[end] & 0xc0) === 0x80) end--
+    chunks.push(new TextDecoder().decode(bytes.slice(start, end)))
+    start = end
+  }
   return chunks
 }
 
@@ -53,6 +65,8 @@ export interface RegisterOwnerFields {
   email: string
   lat: string
   long_: string
+  /** Mejora L — IANA timezone string, ej. "America/Guatemala". */
+  timezone: string
 }
 
 export interface UseRegisterOwner {
@@ -86,6 +100,7 @@ function validate(f: RegisterOwnerFields): string | null {
     return `El email no puede superar ${LIMITS.email} bytes.`
   if (!LATLONG_RE.test(f.lat)) return 'La latitud debe ser un número decimal (ej. -34.6037).'
   if (!LATLONG_RE.test(f.long_)) return 'La longitud debe ser un número decimal (ej. -58.3816).'
+  if (!f.timezone.trim()) return 'La zona horaria (IANA) es requerida.'
   return null
 }
 
@@ -118,7 +133,7 @@ export function useRegisterOwner(): UseRegisterOwner {
         // 20 ADA × 2000 / 10000 = 4 ADA — debe coincidir con init-week.mjs
         const guaranteePerSlot = 4_000_000n
 
-        // ── Datum: DatumOwner = Constr 1 [OwnerRecord (14 campos)] ─
+        // ── Datum: DatumOwner = Constr 1 [OwnerRecord (16 campos)] ─
         const ownerRecord = new Constr(0, [
           tokenNameHex,                    // 0: ownerNFTName = pkh
           ownerPkh,                        // 1: ownerPkh
@@ -133,7 +148,9 @@ export function useRegisterOwner(): UseRegisterOwner {
           fromText(fields.lat),            // 10: lat
           fromText(fields.long_),          // 11: long
           ownerPkh,                        // 12: paymentAddress = pkh raw
-          guaranteePerSlot,                // 13: guarantee_per_slot
+          guaranteePerSlot,                // 13: guarantee_per_slot (vestigial display value — M3)
+          0n,                               // 14: active_weeks_count = 0 (M3 — multiple concurrent weeks allowed)
+          fromText(fields.timezone),       // 15: timezone (Mejora L)
         ])
         const datum = Data.to(new Constr(1, [ownerRecord]))
 

@@ -3,31 +3,21 @@
 // Commission to company. rentals_completed++.
 
 import { useState } from 'react'
-import { Data, Constr, applyParamsToScript } from '@lucid-evolution/lucid'
+import { Data, Constr } from '@lucid-evolution/lucid'
 import { useLucid } from '../lib/LucidContext'
 import {
   OWNERS_VALIDATOR_ADDR,
   RENT_VALIDATOR_ADDR,
-  RENT_VALIDATOR_HASH,
-  RENT_NFT_POLICY,
   OWNER_NFT_POLICY,
-  COMPANY_PKH,
   COMPANY_ADDR,
-  OWNERS_SPEND_COMPILED,
-  RENT_SPEND_COMPILED,
+  MIN_COMMISSION_LOVELACE,
 } from '../lib/config'
 import { getAddressUtxos } from '../lib/blockfrost'
-import { decodeOwnersDatum, decodeRentDatum } from '../lib/decoders'
+import { decodeOwnersDatum, decodeRentDatum, decodeListHeadDatum } from '../lib/decoders'
+import { getRentSpendRefUtxo, getOwnersSpendRefUtxo } from '../lib/refScripts'
 import { unwrapSubmitError } from '../lib/unwrapSubmitError'
 import type { RentSlotUtxo } from './useRentSlots'
 import type { NodeKey } from '../components/types'
-
-const appliedOwnersSpend = applyParamsToScript(OWNERS_SPEND_COMPILED, [
-  new Constr(0, [COMPANY_PKH, OWNER_NFT_POLICY, RENT_VALIDATOR_HASH])
-])
-const appliedRentSpend = applyParamsToScript(RENT_SPEND_COMPILED, [
-  new Constr(0, [OWNER_NFT_POLICY, RENT_NFT_POLICY])
-])
 
 function nodeKeyConstr(nk: NodeKey): Constr<Data> {
   return nk.tag === 'Empty' ? new Constr(1, []) : new Constr(0, [BigInt(nk.key)])
@@ -60,6 +50,9 @@ export function useCollectSlot() {
       // Find predecessor (UTxO whose next = Key(slot.slotId))
       const allRentUtxos = await lucid.utxosAt(RENT_VALIDATOR_ADDR)
 
+      // Scoped to this owner's THIS week (ownerNFTName + weekEnd) — an owner can have
+      // multiple concurrent weeks (M3) and slot IDs repeat across weeks, so matching
+      // only on "next == Key(slotId)" can pick a predecessor from an unrelated week.
       let predUtxo: typeof allRentUtxos[0] | null = null
       let predRawDatum = ''
       for (const u of allRentUtxos) {
@@ -67,18 +60,18 @@ export function useCollectSlot() {
         if (u.txHash === slot.txHash && u.outputIndex === slot.outputIndex) continue
         try {
           const d = decodeRentDatum(u.datum)
-          if (d && d.next.tag === 'Key' && d.next.key === datum.slotId) {
+          if (d && d.ownerNFTName === datum.ownerNFTName && d.weekEnd === datum.weekEnd &&
+              d.next.tag === 'Key' && d.next.key === datum.slotId) {
             predUtxo = u; predRawDatum = u.datum; break
           }
+          if (d) continue
         } catch { /* skip */ }
         try {
-          const outer = Data.from(u.datum) as Constr<Data>
-          if (Number(outer.index) === 0) {
-            const inner = outer.fields[0] as Constr<Data>
-            const nextField = inner.fields[11] as Constr<Data>
-            if (Number(nextField.index) === 0 && BigInt(String(nextField.fields[0])) === BigInt(datum.slotId)) {
-              predUtxo = u; predRawDatum = u.datum; break
-            }
+          const h = decodeListHeadDatum(u.datum)
+          const headWeekEnd = h.config.weekStartPosix + 7 * 24 * 3_600_000
+          if (h.ownerNFTName === datum.ownerNFTName && headWeekEnd === datum.weekEnd &&
+              h.next.tag === 'Key' && h.next.key === datum.slotId) {
+            predUtxo = u; predRawDatum = u.datum; break
           }
         } catch { /* skip */ }
       }
@@ -113,24 +106,26 @@ export function useCollectSlot() {
       const ownerRecord = decodeOwnersDatum(ownerStatsRaw.inline_datum!)
       if (ownerRecord.kind !== 'Owner') throw new Error('Datum inesperado — no es OwnerRecord')
       const ownerLovelace = BigInt(ownerStatsRaw.amount.find(a => a.unit === 'lovelace')?.quantity ?? '0')
-
-      // Updated OwnerRecord: rentals_completed + 1
       const rec = ownerRecord.record
-      const updatedOwnerRecord = new Constr(0, [
-        rec.ownerNFTName, rec.ownerPkh,
-        BigInt(rec.rentalsCompleted) + 1n,
-        BigInt(rec.rentalsRefunded),
-        BigInt(rec.rentalsDisputed),
-        BigInt(rec.rentNFTsProven),
-        rec.fieldName, rec.address, rec.phone, rec.email, rec.lat, rec.long, rec.paymentAddress,
-        rec.guaranteePerSlot,  // field 13 — must be preserved
-      ])
-      const updatedOwnerDatum = Data.to(new Constr(1, [updatedOwnerRecord]))
 
-      // Commission
+      // Updated OwnerRecord: rentals_completed + 1 — preserve all 16 fields generically
+      // (including active_week/timezone, fields 14-15, Mejoras K/L) rather than hardcoding a subset.
+      const rawOwnerDatum = Data.from(ownerStatsRaw.inline_datum!) as Constr<Data>
+      const innerRecord = rawOwnerDatum.fields[0] as Constr<Data>
+      const newRecordFields = [...innerRecord.fields]
+      newRecordFields[2] = BigInt(rec.rentalsCompleted) + 1n
+      const updatedOwnerDatum = Data.to(new Constr(1, [new Constr(0, newRecordFields)]))
+
+      // Mejora M: comisión condonada si < 1 ADA (costaría más en minUTxO que lo que vale).
+      // collect-slot exige after(week_end) siempre, sea o no condonada la comisión.
       const commission = datum.rentPrice * BigInt(datum.siteCommissionBps) / 10000n
+      const commissionForgiven = commission > 0n && commission < MIN_COMMISSION_LOVELACE
+      const nowMs = Date.now()
+      if (nowMs <= datum.weekEnd)
+        throw new Error(`Solo se puede cobrar después de week_end (${new Date(datum.weekEnd).toISOString()})`)
 
-      // Predecessor continues with slot's next
+      // Predecessor continues with slot's next — preserve its FULL value, not just lovelace
+      // (a predecessor that's itself a Confirmed slot may be escrowing its own Rent NFT).
       const newPredDatum = rebuildPredDatum(predRawDatum, nodeKeyConstr(datum.next))
 
       // Redeemers
@@ -138,12 +133,17 @@ export function useCollectSlot() {
       const collectRedeemer     = Data.to(new Constr(4, []))                           // CollectSlot
       const ownersRedeemer      = Data.to(new Constr(1, []))                           // CollectPayments
 
-      const companyAddr = COMPANY_ADDR
+      // rent_spend (9.4 KB) + owners_spend (5.5 KB) inline exceed the 16.384 B tx
+      // limit — read both from their deployed reference script UTxOs instead.
+      const [rentSpendRefUtxo, ownersSpendRefUtxo] = await Promise.all([
+        getRentSpendRefUtxo(lucid),
+        getOwnersSpendRefUtxo(lucid),
+      ])
 
-      const tx = await lucid.newTx()
+      let txBuilder = lucid.newTx()
+        .readFrom([rentSpendRefUtxo, ownersSpendRefUtxo])
         .collectFrom([predUtxo], removePrevRedeemer)
         .collectFrom([freshSlotUtxo], collectRedeemer)
-        .attach.SpendingValidator({ type: 'PlutusV3', script: appliedRentSpend })
         .collectFrom(
           [{
             txHash: ownerStatsRaw.tx_hash,
@@ -154,22 +154,29 @@ export function useCollectSlot() {
           }],
           ownersRedeemer,
         )
-        .attach.SpendingValidator({ type: 'PlutusV3', script: appliedOwnersSpend })
         .pay.ToContract(
           RENT_VALIDATOR_ADDR,
           { kind: 'inline', value: newPredDatum },
-          { lovelace: predUtxo.assets.lovelace },
+          predUtxo.assets,
         )
         .pay.ToContract(
           OWNERS_VALIDATOR_ADDR,
           { kind: 'inline', value: updatedOwnerDatum },
-          { lovelace: ownerLovelace - rec.guaranteePerSlot },  // release 1 slot's guarantee
+          // M3: release THIS slot's own guarantee_per_slot (frozen at insert time from
+          // its week's WeekConfig), not the stats scalar — matches the on-chain check,
+          // which sums guarantee_per_slot from the rent_spend slot input(s) in tx.inputs.
+          { lovelace: ownerLovelace - datum.guaranteePerSlot },
         )
         // G: NFT pass-through — return to wallet (proves NFT ownership on-chain)
         .pay.ToAddress(walletAddr, { lovelace: nftWalletUtxo.assets.lovelace, [fieldNftUnit]: 1n })
-        .pay.ToAddress(companyAddr, { lovelace: commission })
         .addSignerKey(ownerPkh)
-        .complete()
+        .validFrom(datum.weekEnd + 1000)  // after() es abierto: estrictamente posterior a week_end
+
+      if (!commissionForgiven) {
+        txBuilder = txBuilder.pay.ToAddress(COMPANY_ADDR, { lovelace: commission })
+      }
+
+      const tx = await txBuilder.complete()
 
       const signed = await tx.sign.withWallet().complete()
       return await signed.submit()

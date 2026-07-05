@@ -3,8 +3,10 @@ import { useLucid } from '../lib/LucidContext'
 import { useOwnerFields } from '../hooks/useOwnerFields'
 import { useRentSlots } from '../hooks/useRentSlots'
 import { useCollectSlot } from '../hooks/useCollectSlot'
+import { useForceClosePending } from '../hooks/useForceClosePending'
 import { useDeinitWeek } from '../hooks/useDeinitWeek'
 import { useUpdateOwnerInfo } from '../hooks/useUpdateOwnerInfo'
+import { useDeregisterOwner } from '../hooks/useDeregisterOwner'
 import { OwnerRecordCard } from '../components/OwnerRecordCard'
 import { decodeBBS, formatAda } from '../components/lib'
 import { OwnerInfoForm } from '../components/OwnerInfoForm'
@@ -23,16 +25,25 @@ interface WeekView {
 
 function WeekCard({
   week,
+  now,
   onCollect,
   collecting,
+  onForceClose,
+  forceClosing,
   onDeinit,
   deiniting,
+  timeZone,
 }: {
   week: WeekView
+  now: number
   onCollect: (slot: RentSlotUtxo) => void
   collecting: boolean
+  onForceClose: (slot: RentSlotUtxo) => void
+  forceClosing: boolean
   onDeinit: (head: ListHeadUtxo) => void
   deiniting: boolean
+  /** Field's IANA timezone (OwnerRecord.timezone) — defaults to UTC if unknown. */
+  timeZone?: string
 }) {
   const [open, setOpen] = React.useState(true)
   const { config } = week.head.datum
@@ -40,8 +51,11 @@ function WeekCard({
   const weekEndDate = new Date(week.weekEnd)
   const completedInWeek = week.slots.filter(s => s.datum.status === 'Completed')
 
+  // weekStartPosix/weekEnd are UTC on-chain — format in the field's own
+  // timezone, matching the schedule's local hours (see lib/timezone.ts).
+  const tz = timeZone || 'UTC'
   const fmt = (d: Date) =>
-    d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })
+    d.toLocaleDateString('es-AR', { timeZone: tz, day: 'numeric', month: 'short', year: 'numeric' })
 
   return (
     <div className="rounded-[12px] border border-[var(--line-strong)] overflow-hidden">
@@ -80,7 +94,7 @@ function WeekCard({
           )}
           {week.slots.map(s => (
             <div key={s.txHash + '#' + s.outputIndex}>
-              <RentSlotRow datum={s.datum} />
+              <RentSlotRow datum={s.datum} timeZone={tz} />
               {s.datum.status === 'Completed' && (
                 <button
                   type="button"
@@ -89,6 +103,16 @@ function WeekCard({
                   className="mt-1 px-3 py-1.5 rounded-[8px] text-xs font-semibold border border-[var(--mint-ink)] text-[var(--mint-ink)] bg-[var(--mint-bg)] hover:opacity-80 disabled:opacity-40"
                 >
                   {collecting ? 'Cobrando…' : 'Cobrar slot'}
+                </button>
+              )}
+              {s.datum.status === 'Pending' && now > s.datum.cancelDeadline && (
+                <button
+                  type="button"
+                  disabled={forceClosing}
+                  onClick={() => onForceClose(s)}
+                  className="mt-1 px-3 py-1.5 rounded-[8px] text-xs font-semibold border border-[var(--rose-ink)] text-[var(--rose-ink)] bg-[var(--rose-bg)] hover:opacity-80 disabled:opacity-40"
+                >
+                  {forceClosing ? 'Cerrando…' : 'Forzar cierre (cliente no confirmó)'}
                 </button>
               )}
             </div>
@@ -131,11 +155,23 @@ export default function OwnerPanel() {
   const { collectSlot, loading: collecting, error: collectError } = useCollectSlot()
   const [collectTxHash, setCollectTxHash] = React.useState<string | null>(null)
 
+  const { forceClosePending, loading: forceClosing, error: forceCloseError } = useForceClosePending()
+  const [forceCloseTxHash, setForceCloseTxHash] = React.useState<string | null>(null)
+
   const { deinitWeek, loading: deiniting, error: deinitError } = useDeinitWeek()
   const [deinitTxHash, setDeinitTxHash] = React.useState<string | null>(null)
 
+  const [now, setNow] = React.useState(() => Date.now())
+  React.useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
+
   const { updateOwnerInfo, loading: updatingInfo, error: updateInfoError } = useUpdateOwnerInfo()
   const [updateTxHash, setUpdateTxHash] = React.useState<string | null>(null)
+
+  const { deregister, loading: deregistering, error: deregisterError } = useDeregisterOwner()
+  const [deregisterTxHash, setDeregisterTxHash] = React.useState<string | null>(null)
 
   if (!connected) return (
     <div className="max-w-xl mx-auto px-4 py-16 text-center">
@@ -198,12 +234,29 @@ export default function OwnerPanel() {
     if (next) handleCollect(next)
   }
 
+  const handleForceClose = async (slot: RentSlotUtxo) => {
+    try {
+      const txHash = await forceClosePending(slot)
+      setForceCloseTxHash(txHash)
+      setTimeout(() => reload(), 3_000)
+    } catch { /* error shown in forceCloseError */ }
+  }
+
   const handleDeinit = async (head: ListHeadUtxo) => {
     try {
       const txHash = await deinitWeek(head)
       setDeinitTxHash(txHash)
       setTimeout(() => reload(), 3_000)
     } catch { /* error shown in deinitError */ }
+  }
+
+  const handleDeregister = async () => {
+    if (!selectedField) return
+    try {
+      const txHash = await deregister(selectedField.ownerNFTName)
+      setDeregisterTxHash(txHash)
+      setTimeout(() => reload(), 3_000)
+    } catch { /* error shown in deregisterError */ }
   }
 
   const handleUpdateInfo = async (patch: MutableOwnerFields) => {
@@ -286,6 +339,18 @@ export default function OwnerPanel() {
         </div>
       )}
 
+      {forceCloseError && (
+        <div className="px-4 py-3 rounded-[10px] bg-[var(--rose-bg)] border border-[#ecb5ac] text-[var(--rose-ink)] text-sm">
+          Error al forzar cierre: {forceCloseError}
+        </div>
+      )}
+      {forceCloseTxHash && (
+        <div className="px-4 py-3 rounded-[10px] bg-[var(--mint-bg)] border border-[#b9d8c1] text-[#244d33] text-sm flex items-center justify-between">
+          <span>¡Slot cerrado! Tx: <span className="font-mono">{forceCloseTxHash.slice(0, 12)}…</span></span>
+          <button onClick={() => setForceCloseTxHash(null)} className="text-[var(--muted)] hover:text-[var(--ink)] ml-2">✕</button>
+        </div>
+      )}
+
       {deinitError && (
         <div className="px-4 py-3 rounded-[10px] bg-[var(--rose-bg)] border border-[#ecb5ac] text-[var(--rose-ink)] text-sm">
           Error al cerrar semana: {deinitError}
@@ -321,10 +386,14 @@ export default function OwnerPanel() {
             <WeekCard
               key={w.head.txHash + '#' + w.head.outputIndex}
               week={w}
+              now={now}
               onCollect={handleCollect}
               collecting={collecting}
+              onForceClose={handleForceClose}
+              forceClosing={forceClosing}
               onDeinit={handleDeinit}
               deiniting={deiniting}
+              timeZone={record.timezone}
             />
           ))}
           {orphanSlots.length > 0 && (
@@ -332,7 +401,7 @@ export default function OwnerPanel() {
               <p className="text-[12px] text-[var(--muted)] font-medium mb-1">Slots sin semana asociada</p>
               {orphanSlots.map(s => (
                 <div key={s.txHash + '#' + s.outputIndex}>
-                  <RentSlotRow datum={s.datum} />
+                  <RentSlotRow datum={s.datum} timeZone={record.timezone} />
                   {s.datum.status === 'Completed' && (
                     <button
                       type="button"
@@ -343,11 +412,56 @@ export default function OwnerPanel() {
                       {collecting ? 'Cobrando…' : 'Cobrar slot'}
                     </button>
                   )}
+                  {s.datum.status === 'Pending' && now > s.datum.cancelDeadline && (
+                    <button
+                      type="button"
+                      disabled={forceClosing}
+                      onClick={() => handleForceClose(s)}
+                      className="mt-1 px-3 py-1.5 rounded-[8px] text-xs font-semibold border border-[var(--rose-ink)] text-[var(--rose-ink)] bg-[var(--rose-bg)] hover:opacity-80 disabled:opacity-40"
+                    >
+                      {forceClosing ? 'Cerrando…' : 'Forzar cierre (cliente no confirmó)'}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-[18px] font-semibold mb-2">Dar de baja esta cancha</h2>
+        <p className="text-[var(--muted)] text-sm mb-3">
+          Quema tu Owner NFT y libera el stats UTxO. Requiere que no haya semana activa
+          (cerrá la semana primero). Solo necesita tu firma.
+        </p>
+        {record.activeWeeksCount !== 0 ? (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-[10px] px-3 py-2">
+            Hay {record.activeWeeksCount} semana(s) activa(s) — cerralas (Cerrar semana) antes de poder dar de baja.
+          </p>
+        ) : (
+          <>
+            {deregisterError && (
+              <div className="px-4 py-3 mb-3 rounded-[10px] bg-[var(--rose-bg)] border border-[#ecb5ac] text-[var(--rose-ink)] text-sm">
+                {deregisterError}
+              </div>
+            )}
+            {deregisterTxHash ? (
+              <div className="px-4 py-3 rounded-[10px] bg-[var(--mint-bg)] border border-[#b9d8c1] text-[#244d33] text-sm">
+                ¡Cancha dada de baja! Tx: <span className="font-mono">{deregisterTxHash.slice(0, 12)}…</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={deregistering}
+                onClick={handleDeregister}
+                className="px-3.5 py-2 rounded-[10px] border border-[var(--rose-ink)] text-[var(--rose-ink)] bg-[var(--rose-bg)] text-[13px] font-semibold disabled:opacity-40"
+              >
+                {deregistering ? 'Firmando…' : 'Dar de baja'}
+              </button>
+            )}
+          </>
+        )}
       </section>
 
       {record && (

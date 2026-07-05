@@ -36,6 +36,8 @@ export interface RentSlotCardProps {
   onCancelRent?: () => void;
   onRedeemAtField?: () => void;
   onOpenDispute?: () => void;
+  /** Field's IANA timezone (OwnerRecord.timezone) — defaults to UTC if unknown. */
+  timeZone?: string;
 }
 
 export function RentSlotCard({
@@ -47,6 +49,7 @@ export function RentSlotCard({
   onCancelRent,
   onRedeemAtField,
   onOpenDispute,
+  timeZone = 'UTC',
 }: RentSlotCardProps) {
   const isCustomer = viewerPkh && datum.customerPkh === viewerPkh;
   const isOwner = viewerPkh && datum.ownerPkh === viewerPkh;
@@ -64,7 +67,7 @@ export function RentSlotCard({
           <div className="min-w-0">
             <h3 className="font-semibold text-[15px] truncate">{decodeBBS(datum.fieldName)}</h3>
             <p className="text-[12px] text-[var(--muted)] truncate">
-              {slotIdLabel(datum.slotId)} · {formatPosixDateTime(datum.slotStart)}
+              {slotIdLabel(datum.slotId)} · {formatPosixDateTime(datum.slotStart, 'es', timeZone)}
             </p>
           </div>
         </div>
@@ -117,9 +120,9 @@ export function RentSlotCard({
               Detalles on-chain
             </summary>
             <div className="mt-3 flex flex-col gap-0.5">
-              <KV label="slotStart" mono>{formatPosixDateTime(datum.slotStart)}</KV>
-              <KV label="slotEnd" mono>{formatPosixDateTime(datum.slotEnd)}</KV>
-              <KV label="cancelDeadline" mono>{formatPosixDateTime(datum.cancelDeadline)}</KV>
+              <KV label="slotStart" mono>{formatPosixDateTime(datum.slotStart, 'es', timeZone)}</KV>
+              <KV label="slotEnd" mono>{formatPosixDateTime(datum.slotEnd, 'es', timeZone)}</KV>
+              <KV label="cancelDeadline" mono>{formatPosixDateTime(datum.cancelDeadline, 'es', timeZone)}</KV>
               <KV label="siteCommission" mono>{formatBps(datum.siteCommissionBps)}</KV>
               <KV label="ownerNFT" mono>
                 <AssetName tokenName={datum.ownerNFTName} variant="inline" glyph={false} />

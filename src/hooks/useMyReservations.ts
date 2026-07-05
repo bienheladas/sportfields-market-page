@@ -5,7 +5,7 @@ import { RENT_VALIDATOR_ADDR } from '../lib/config'
 import type { RentDatum, SlotStatus } from '../components/types'
 import type { RentSlotUtxo } from './useRentSlots'
 
-const CUSTOMER_STATUSES: SlotStatus[] = ['Confirmed', 'Completed', 'Refunded', 'Disputed']
+const CUSTOMER_STATUSES: SlotStatus[] = ['Pending', 'Confirmed', 'Completed', 'Disputed']
 
 export function useMyReservations(customerPkh: string | null) {
   const [slots, setSlots] = useState<RentSlotUtxo[]>([])

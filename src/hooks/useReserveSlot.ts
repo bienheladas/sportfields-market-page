@@ -13,8 +13,9 @@ import {
   RENT_SPEND_COMPILED,
   RENT_MINT_COMPILED,
 } from '../lib/config'
-import { decodeRentDatum, decodeListHeadDatum } from '../lib/decoders'
+import { decodeRentDatum, decodeListHeadDatum, hexToBytes } from '../lib/decoders'
 import { unwrapSubmitError } from '../lib/unwrapSubmitError'
+import { rentNftMetadata721 } from '../lib/rentNftMetadata'
 import type { ListHeadUtxo } from './useRentSlots'
 import type { NodeKey } from '../components/types'
 
@@ -63,7 +64,13 @@ export function useReserveSlot() {
       if (!headDatum.config.openSlotIds.includes(slotId))
         throw new Error(`Slot ${slotId} no está en open_slot_ids del head`)
 
-      // Parse all Node UTxOs for this owner
+      // Compute this head's week boundary up front so we can scope the node search to it —
+      // an owner can have multiple concurrent weeks (M3), each its own linked list, and slot
+      // IDs are reused across weeks. Matching by ownerNFTName alone mixes lists from different
+      // weeks together and corrupts the predecessor search.
+      const thisWeekEnd = headDatum.config.weekStartPosix + 7 * 24 * 3_600_000
+
+      // Parse all Node UTxOs for this owner's week
       type NodeInfo = { utxo: typeof headUtxo; slotId: number; rawNext: NodeKey; rawDatum: string }
       const nodes: NodeInfo[] = []
       for (const u of allUtxos) {
@@ -71,7 +78,7 @@ export function useReserveSlot() {
         if (u.txHash === headUtxo.txHash && u.outputIndex === headUtxo.outputIndex) continue
         try {
           const d = decodeRentDatum(u.datum)
-          if (d && d.ownerNFTName === headDatum.ownerNFTName) {
+          if (d && d.ownerNFTName === headDatum.ownerNFTName && d.weekEnd === thisWeekEnd) {
             nodes.push({ utxo: u, slotId: d.slotId, rawNext: d.next, rawDatum: u.datum })
           }
         } catch { /* skip malformed */ }
@@ -106,8 +113,9 @@ export function useReserveSlot() {
       const cancelDeadline = slotStart - cfg.cancelDeadlineOffsetMs
       const weekEnd        = cfg.weekStartPosix + 7 * 24 * 3_600_000
 
-      // Rent NFT name: first 4 bytes of ownerNFTName + customerPkh (32 bytes total)
-      const rentNFTName = headDatum.ownerNFTName.slice(0, 8) + customerPkh
+      // Rent NFT name: LAST 4 bytes of ownerNFTName (field's random suffix, not
+      // the owner's pkh prefix) + customerPkh (32 bytes total) — field-specific.
+      const rentNFTName = headDatum.ownerNFTName.slice(-8) + customerPkh
       const rentNFTUnit = RENT_NFT_POLICY + rentNFTName
 
       // New node's next = predecessor's old next
@@ -138,6 +146,7 @@ export function useReserveSlot() {
         slotNextConstr,                             // next = pred's old next
         BigInt(weekEnd),                            // week_end
         BigInt(cfg.loyaltyNftsRequired),            // loyalty_nfts_required
+        cfg.guaranteePerSlot,                       // guarantee_per_slot — M3
       ])]))
 
       // Predecessor continues with next = Key(slotId)
@@ -151,15 +160,20 @@ export function useReserveSlot() {
       // Also cap at Date.now() + 10min to avoid TimeTranslationPastHorizon.
       const reserveDeadline = slotStart - 60_000
 
+      const fieldNameText = new TextDecoder().decode(hexToBytes(headDatum.fieldName))
+
       let txBuilder = lucid.newTx()
         .collectFrom([predUtxo], insertRedeemer)
         .attach.SpendingValidator({ type: 'PlutusV3', script: appliedRentSpend })
         .mintAssets({ [rentNFTUnit]: 1n }, mintRedeemer)
         .attach.MintingPolicy({ type: 'PlutusV3', script: appliedRentMint })
+        .attachMetadata(721, rentNftMetadata721(RENT_NFT_POLICY, rentNFTName, fieldNameText))
+        // Predecessor continues — preserve its FULL value, not just lovelace (a
+        // predecessor that's itself a Confirmed/Disputed slot may escrow its own NFT).
         .pay.ToContract(
           RENT_VALIDATOR_ADDR,
           { kind: 'inline', value: newPredDatum },
-          { lovelace: predUtxo.assets.lovelace },
+          predUtxo.assets,
         )
         .pay.ToContract(
           RENT_VALIDATOR_ADDR,

@@ -26,6 +26,8 @@ export interface BookingPanelProps {
   connected: boolean;
   /** PKH (hex, 28 bytes) del viewer conectado — habilita el botón cancelar. */
   viewerPkh?: string | null;
+  /** Field's IANA timezone (OwnerRecord.timezone) — defaults to UTC if unknown. */
+  timeZone?: string;
 }
 
 const DAY_NAMES_FULL_ES = [
@@ -41,6 +43,7 @@ export function BookingPanel({
   onConnectWallet,
   connected,
   viewerPkh = null,
+  timeZone = 'UTC',
 }: BookingPanelProps) {
   const open = slot != null;
   const [submitting, setSubmitting] = React.useState(false);
@@ -139,7 +142,7 @@ export function BookingPanel({
               {DAY_NAMES_SHORT_ES[day]} · {h0}:00–{h1}:00
             </h3>
             <p className="m-0 mb-3.5 text-[var(--muted)] text-[13px]">
-              {fullDateLabel(d.slotStart)}
+              {fullDateLabel(d.slotStart, timeZone)}
             </p>
             <SlotStatusBadge status={d.status} />
             <button
@@ -157,9 +160,9 @@ export function BookingPanel({
           {/* Body */}
           <div className="flex-1 overflow-y-auto px-6 py-4">
             {isAvailable ? (
-              <AvailableBody d={d} />
+              <AvailableBody d={d} timeZone={timeZone} />
             ) : (
-              <NonAvailableBody d={d} isCustomer={isCustomer} canCancel={canCancel} />
+              <NonAvailableBody d={d} isCustomer={isCustomer} canCancel={canCancel} timeZone={timeZone} />
             )}
           </div>
 
@@ -207,8 +210,8 @@ export function BookingPanel({
 // Body — Available
 // ───────────────────────────────────────────────────────────────────
 
-function AvailableBody({ d }: { d: RentSlotUtxoLike['datum'] }) {
-  const cancelLabel = formatPosixDateTime(d.cancelDeadline);
+function AvailableBody({ d, timeZone }: { d: RentSlotUtxoLike['datum']; timeZone: string }) {
+  const cancelLabel = formatPosixDateTime(d.cancelDeadline, 'es', timeZone);
   const rentAda = Number(d.rentPrice) / 1_000_000;
   const commission = (rentAda * d.siteCommissionBps) / 10_000;
   const total = rentAda + commission;
@@ -235,7 +238,7 @@ function AvailableBody({ d }: { d: RentSlotUtxoLike['datum'] }) {
 
       <Section title="On-chain" last>
         <KvRow label="slotId" value={String(d.slotId)} mono />
-        <KvRow label="slotStart" value={formatPosixDateTime(d.slotStart)} mono />
+        <KvRow label="slotStart" value={formatPosixDateTime(d.slotStart, 'es', timeZone)} mono />
         <KvRow label="cancelDeadline" value={cancelLabel} mono />
         <KvRow label="ownerNFTName" value={shortenAddr(d.ownerNFTName, 6, 4)} mono />
       </Section>
@@ -251,12 +254,14 @@ function NonAvailableBody({
   d,
   isCustomer,
   canCancel,
+  timeZone,
 }: {
   d: RentSlotUtxoLike['datum'];
   isCustomer: boolean;
   canCancel: boolean;
+  timeZone: string;
 }) {
-  const cancelLabel = formatPosixDateTime(d.cancelDeadline);
+  const cancelLabel = formatPosixDateTime(d.cancelDeadline, 'es', timeZone);
   const past = Date.now() > d.cancelDeadline;
   const rentAda = Number(d.rentPrice) / 1_000_000;
   const cancelPenalty = 2;
@@ -267,8 +272,8 @@ function NonAvailableBody({
       <Section title="Detalles del slot">
         <KvRow label="slotId" value={String(d.slotId)} mono />
         <KvRow label="Precio" value={formatAda(d.rentPrice, { decimals: 2 })} />
-        <KvRow label="slotStart" value={formatPosixDateTime(d.slotStart)} mono />
-        <KvRow label="slotEnd" value={formatPosixDateTime(d.slotEnd)} mono />
+        <KvRow label="slotStart" value={formatPosixDateTime(d.slotStart, 'es', timeZone)} mono />
+        <KvRow label="slotEnd" value={formatPosixDateTime(d.slotEnd, 'es', timeZone)} mono />
       </Section>
 
       <Section title="Cancelación">
@@ -474,12 +479,18 @@ function formatBps(bps: number): string {
   return `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 2)}%`;
 }
 
-function fullDateLabel(t: number): string {
+function fullDateLabel(t: number, timeZone: string): string {
+  // Must be formatted in the field's own timezone — matches WeekCalendar's hour
+  // grid (derived from slotId, implicitly local) and formatPosixDateTime.
   const d = new Date(t);
-  const dayName = DAY_NAMES_FULL_ES[(d.getDay() + 6) % 7];
+  const weekdayName = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(d);
+  const dayName = DAY_NAMES_FULL_ES[WEEKDAY_INDEX_EN[weekdayName] ?? 0];
   return `${dayName} ${d.toLocaleDateString('es-AR', {
+    timeZone,
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   })}`;
 }
+
+const WEEKDAY_INDEX_EN: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };

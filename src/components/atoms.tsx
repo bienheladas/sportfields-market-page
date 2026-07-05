@@ -141,7 +141,6 @@ const STATUS_CLASSES: Record<SlotStatus, string> = {
   Pending:   'bg-[var(--amber-bg)] text-[var(--amber-deep)]',
   Confirmed: 'bg-[var(--accent-soft)] text-[var(--accent-deep)]',
   Completed: 'bg-[var(--slate-bg)] text-[#2c4055]',
-  Refunded:  'bg-[var(--paper-2)] text-[var(--muted)]',
   Disputed:  'bg-[var(--rose-bg)] text-[#6f2920]',
 };
 
@@ -150,7 +149,6 @@ const STATUS_LABEL_ES: Record<SlotStatus, string> = {
   Pending:   'Pendiente',
   Confirmed: 'Confirmada',
   Completed: 'Jugada',
-  Refunded:  'Reembolsada',
   Disputed:  'En disputa',
 };
 

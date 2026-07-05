@@ -12,9 +12,11 @@ export interface RentSlotRowProps {
   onClick?: () => void;
   /** Highlight when this row matches the connected wallet's PKH. */
   highlight?: boolean;
+  /** Field's IANA timezone (OwnerRecord.timezone) — defaults to UTC if unknown. */
+  timeZone?: string;
 }
 
-export function RentSlotRow({ datum, onClick, highlight }: RentSlotRowProps) {
+export function RentSlotRow({ datum, onClick, highlight, timeZone = 'UTC' }: RentSlotRowProps) {
   return (
     <button
       onClick={onClick}
@@ -35,7 +37,7 @@ export function RentSlotRow({ datum, onClick, highlight }: RentSlotRowProps) {
           {slotIdLabel(datum.slotId)}
         </div>
         <div className="text-[11px] text-[var(--muted)] truncate font-mono">
-          {decodeBBS(datum.fieldName)} · {formatPosixDateTime(datum.slotStart)}
+          {decodeBBS(datum.fieldName)} · {formatPosixDateTime(datum.slotStart, 'es', timeZone)}
         </div>
       </div>
 

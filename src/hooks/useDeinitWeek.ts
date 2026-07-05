@@ -1,8 +1,6 @@
-// Tx: DeinitWeek — owner closes an empty ListHead (next === Empty).
-// Spends: ListHead only (DeinitWeek redeemer on rent_spend).
-// The stats UTxO is NOT spent — check_deinit_week only needs the Owner NFT
-// present in tx.inputs, which coin selection satisfies automatically via
-// the pay.ToAddress(NFT) output.
+// Tx: DeinitWeek — owner closes an empty ListHead (next === Empty) AND decrements
+// active_weeks_count on the stats UTxO (ClearActiveWeek, M3) by 1 — multiple
+// concurrent weeks are allowed, so this only closes the week being deinitialized.
 //
 // Old-format registrations (Owner NFT locked inside owners_spend stats UTxO)
 // cannot be handled here because spending that UTxO requires accessing
@@ -10,19 +8,17 @@
 // Use the off-chain deinit-week.mjs script for those.
 
 import { useState } from 'react'
-import { Data, Constr, applyParamsToScript } from '@lucid-evolution/lucid'
+import { Data, Constr } from '@lucid-evolution/lucid'
 import { useLucid } from '../lib/LucidContext'
 import {
+  OWNERS_VALIDATOR_ADDR,
   OWNER_NFT_POLICY,
-  RENT_NFT_POLICY,
-  RENT_SPEND_COMPILED,
 } from '../lib/config'
+import { getAddressUtxos } from '../lib/blockfrost'
+import { decodeOwnersDatum } from '../lib/decoders'
+import { getRentSpendRefUtxo, getOwnersSpendRefUtxo } from '../lib/refScripts'
 import { unwrapSubmitError } from '../lib/unwrapSubmitError'
 import type { ListHeadUtxo } from './useRentSlots'
-
-const appliedRentSpend = applyParamsToScript(RENT_SPEND_COMPILED, [
-  new Constr(0, [OWNER_NFT_POLICY, RENT_NFT_POLICY])
-])
 
 export function useDeinitWeek() {
   const { lucid, pkh: ownerPkh } = useLucid()
@@ -53,16 +49,61 @@ export function useDeinitWeek() {
         )
       }
 
-      const deinitRedeemer = Data.to(new Constr(9, []))  // DeinitWeek
+      // ── Owner stats UTxO (to clear active_week) ──
+      const ownersUtxos = await getAddressUtxos(OWNERS_VALIDATOR_ADDR)
+      const ownerStatsRaw = ownersUtxos.find(u => {
+        if (!u.inline_datum) return false
+        if (u.amount.some(a => a.unit === fieldNftUnit)) return false
+        try {
+          const d = decodeOwnersDatum(u.inline_datum)
+          return d.kind === 'Owner' && d.record.ownerNFTName === fieldNftName
+        } catch { return false }
+      })
+      if (!ownerStatsRaw) throw new Error('Stats UTxO del propietario no encontrado en el contrato')
+      const ownerLovelace = BigInt(ownerStatsRaw.amount.find(a => a.unit === 'lovelace')?.quantity ?? '0')
+
+      const raw = Data.from(ownerStatsRaw.inline_datum!) as Constr<Data>
+      const innerRecord = raw.fields[0] as Constr<Data>
+      const currentActiveWeeksCount = innerRecord.fields[14] as bigint
+      if (currentActiveWeeksCount <= 0n)
+        throw new Error('active_weeks_count ya es 0 — no hay semana activa que cerrar')
+      const newRecordFields = [...innerRecord.fields]
+      newRecordFields[14] = currentActiveWeeksCount - 1n  // active_weeks_count-- (M3)
+      const newStatsDatum = Data.to(new Constr(1, [new Constr(0, newRecordFields)]))
+
+      const deinitRedeemer          = Data.to(new Constr(9, []))  // DeinitWeek (rent_spend)
+      const clearActiveWeekRedeemer = Data.to(new Constr(6, []))  // ClearActiveWeek (owners_spend)
 
       const [headUtxo] = await lucid.utxosByOutRef([{ txHash: head.txHash, outputIndex: head.outputIndex }])
       if (!headUtxo) throw new Error('ListHead UTxO no encontrado en la cadena')
 
+      // rent_spend (9.4 KB) + owners_spend (5.5 KB) inline exceed the 16.384 B tx
+      // limit — read both from their deployed reference script UTxOs instead.
+      const [rentSpendRefUtxo, ownersSpendRefUtxo] = await Promise.all([
+        getRentSpendRefUtxo(lucid),
+        getOwnersSpendRefUtxo(lucid),
+      ])
+
       // Paying the NFT back to wallet forces coin selection to include nftWalletUtxo
       // as a tx input, satisfying owner_nft_present() in check_deinit_week.
       const tx = await lucid.newTx()
+        .readFrom([rentSpendRefUtxo, ownersSpendRefUtxo])
         .collectFrom([headUtxo], deinitRedeemer)
-        .attach.SpendingValidator({ type: 'PlutusV3', script: appliedRentSpend })
+        .collectFrom(
+          [{
+            txHash: ownerStatsRaw.tx_hash,
+            outputIndex: ownerStatsRaw.output_index,
+            address: OWNERS_VALIDATOR_ADDR,
+            assets: { lovelace: ownerLovelace },
+            datum: ownerStatsRaw.inline_datum!,
+          }],
+          clearActiveWeekRedeemer,
+        )
+        .pay.ToContract(
+          OWNERS_VALIDATOR_ADDR,
+          { kind: 'inline', value: newStatsDatum },
+          { lovelace: ownerLovelace },
+        )
         .pay.ToAddress(walletAddr, { lovelace: nftWalletUtxo.assets.lovelace, [fieldNftUnit]: 1n })
         .addSignerKey(ownerPkh)
         .complete()

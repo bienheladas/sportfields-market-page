@@ -3,27 +3,18 @@
 // Refunds rentPrice to customer. No continuing slot output.
 
 import { useState } from 'react'
-import { Data, Constr, applyParamsToScript } from '@lucid-evolution/lucid'
+import { Data, Constr } from '@lucid-evolution/lucid'
 import { useLucid } from '../lib/LucidContext'
-import {
-  RENT_VALIDATOR_ADDR,
-  RENT_NFT_POLICY,
-  COMPANY_PKH,
-  OWNER_NFT_POLICY,
-  RENT_SPEND_COMPILED,
-  RENT_MINT_COMPILED,
-} from '../lib/config'
-import { decodeRentDatum } from '../lib/decoders'
+import { RENT_VALIDATOR_ADDR, OWNERS_VALIDATOR_ADDR, RENT_NFT_POLICY } from '../lib/config'
+import { decodeRentDatum, decodeListHeadDatum } from '../lib/decoders'
 import { unwrapSubmitError } from '../lib/unwrapSubmitError'
+import { getRentSpendRefUtxo, getOwnersSpendRefUtxo, getRentMintRefUtxo } from '../lib/refScripts'
+import {
+  findCustomerRecordUtxo, initialCustomerRecordDatum, bumpedCustomerRecordDatum,
+  updateCustomerRecordRedeemer, CUSTOMER_RECORD_MIN_LOVELACE,
+} from '../lib/customerRecord'
 import type { RentSlotUtxo } from './useRentSlots'
 import type { NodeKey } from '../components/types'
-
-const appliedRentSpend = applyParamsToScript(RENT_SPEND_COMPILED, [
-  new Constr(0, [OWNER_NFT_POLICY, RENT_NFT_POLICY])
-])
-const appliedRentMint = applyParamsToScript(RENT_MINT_COMPILED, [
-  new Constr(0, [COMPANY_PKH])
-])
 
 function nodeKeyConstr(nk: NodeKey): Constr<Data> {
   return nk.tag === 'Empty' ? new Constr(1, []) : new Constr(0, [BigInt(nk.key)])
@@ -55,7 +46,10 @@ export function useCancelRent() {
       // Fetch fresh UTxOs to locate the predecessor
       const allUtxos = await lucid.utxosAt(RENT_VALIDATOR_ADDR)
 
-      // Find predecessor: UTxO whose next = Key(slot.slotId)
+      // Find predecessor: UTxO whose next = Key(slot.slotId), scoped to this owner's THIS
+      // week (ownerNFTName + weekEnd) — an owner can have multiple concurrent weeks (M3)
+      // and slot IDs repeat across weeks, so matching only on "next == Key(slotId)" can
+      // pick a predecessor from an unrelated week.
       let predUtxo: typeof allUtxos[0] | null = null
       let predRawDatum = ''
       for (const u of allUtxos) {
@@ -64,19 +58,19 @@ export function useCancelRent() {
         try {
           // Try as Node
           const d = decodeRentDatum(u.datum)
-          if (d && d.next.tag === 'Key' && d.next.key === datum.slotId) {
+          if (d && d.ownerNFTName === datum.ownerNFTName && d.weekEnd === datum.weekEnd &&
+              d.next.tag === 'Key' && d.next.key === datum.slotId) {
             predUtxo = u; predRawDatum = u.datum; break
           }
+          if (d) continue
         } catch { /* skip */ }
         // Try as Head
         try {
-          const outer = Data.from(u.datum) as Constr<Data>
-          if (Number(outer.index) === 0) {
-            const inner = outer.fields[0] as Constr<Data>
-            const nextField = inner.fields[11] as Constr<Data>
-            if (Number(nextField.index) === 0 && BigInt(String(nextField.fields[0])) === BigInt(datum.slotId)) {
-              predUtxo = u; predRawDatum = u.datum; break
-            }
+          const h = decodeListHeadDatum(u.datum)
+          const headWeekEnd = h.config.weekStartPosix + 7 * 24 * 3_600_000
+          if (h.ownerNFTName === datum.ownerNFTName && headWeekEnd === datum.weekEnd &&
+              h.next.tag === 'Key' && h.next.key === datum.slotId) {
+            predUtxo = u; predRawDatum = u.datum; break
           }
         } catch { /* skip */ }
       }
@@ -100,17 +94,26 @@ export function useCancelRent() {
       // ValidTo: must be ≤ cancelDeadline
       const validToMs = Math.min(Date.now() + 10 * 60_000, datum.cancelDeadline - 1)
 
+      // CustomerRecord (per cancha) — bump rentals_cancelled. No redeemer/auth
+      // needed to create the first one (see lib/customerRecord.ts).
+      const existingRecord = await findCustomerRecordUtxo(customerPkh, datum.ownerNFTName)
+
+      const [rentSpendRefUtxo, ownersSpendRefUtxo, rentMintRefUtxo] = await Promise.all([
+        getRentSpendRefUtxo(lucid), getOwnersSpendRefUtxo(lucid), getRentMintRefUtxo(lucid),
+      ])
+
       let txBuilder = lucid.newTx()
+        .readFrom([rentSpendRefUtxo, ownersSpendRefUtxo])
         // Spend predecessor with RemovePrev
         .collectFrom([predUtxo], removePrevRedeemer)
         // Spend slot with CancelRent
         .collectFrom([freshSlotUtxo], cancelRedeemer)
-        .attach.SpendingValidator({ type: 'PlutusV3', script: appliedRentSpend })
-        // Predecessor continues with updated next
+        // Predecessor continues with updated next — preserve its FULL value, not just
+        // lovelace (a predecessor that's itself a Confirmed slot may escrow its own NFT).
         .pay.ToContract(
           RENT_VALIDATOR_ADDR,
           { kind: 'inline', value: newPredDatum },
-          { lovelace: predUtxo.assets.lovelace },
+          predUtxo.assets,
         )
         // Refund rentPrice to customer
         .pay.ToAddress(customerAddr, { lovelace: datum.rentPrice })
@@ -121,8 +124,30 @@ export function useCancelRent() {
       if (datum.rentNFTName) {
         const tokenUnit = RENT_NFT_POLICY + datum.rentNFTName
         txBuilder = txBuilder
+          .readFrom([rentMintRefUtxo])
           .mintAssets({ [tokenUnit]: -1n }, mintRedeemer)
-          .attach.MintingPolicy({ type: 'PlutusV3', script: appliedRentMint })
+      }
+
+      if (existingRecord) {
+        txBuilder = txBuilder
+          .collectFrom(
+            [{ txHash: existingRecord.tx_hash, outputIndex: existingRecord.output_index,
+               address: OWNERS_VALIDATOR_ADDR,
+               assets: { lovelace: BigInt(existingRecord.amount.find(a => a.unit === 'lovelace')?.quantity ?? '0') },
+               datum: existingRecord.inline_datum! }],
+            updateCustomerRecordRedeemer('RentalCancelled'),
+          )
+          .pay.ToContract(
+            OWNERS_VALIDATOR_ADDR,
+            { kind: 'inline', value: bumpedCustomerRecordDatum(existingRecord.inline_datum!, 'RentalCancelled') },
+            { lovelace: BigInt(existingRecord.amount.find(a => a.unit === 'lovelace')?.quantity ?? '0') },
+          )
+      } else {
+        txBuilder = txBuilder.pay.ToContract(
+          OWNERS_VALIDATOR_ADDR,
+          { kind: 'inline', value: initialCustomerRecordDatum(customerPkh, datum.ownerNFTName, 'RentalCancelled') },
+          { lovelace: CUSTOMER_RECORD_MIN_LOVELACE },
+        )
       }
 
       const tx     = await txBuilder.complete()

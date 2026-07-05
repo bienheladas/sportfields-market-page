@@ -42,16 +42,19 @@ export type SlotStatus =
   | 'Pending'
   | 'Confirmed'
   | 'Completed'
-  | 'Refunded'
   | 'Disputed';
 
-/** Plutus constructor index → status. Mirrors makeIsDataSchemaIndexed order. */
-export const SLOT_STATUS_BY_TAG: SlotStatus[] = [
+// Aiken contract's status Constr indexes: Available=0, Pending=1, Confirmed=2,
+// Completed=3, Disputed=5 — index 4 is unused (there is no "Refunded" status;
+// a refunded slot is removed from the linked list entirely, not transitioned
+// to a terminal state in place). Index 4 left as a gap so an unexpected datum
+// at that index throws instead of silently decoding as something invalid.
+export const SLOT_STATUS_BY_TAG: (SlotStatus | undefined)[] = [
   'Available',
   'Pending',
   'Confirmed',
   'Completed',
-  'Refunded',
+  undefined,
   'Disputed',
 ];
 
@@ -73,6 +76,8 @@ export interface WeekConfig {
   siteCommissionBps: number
   openSlotIds: number[]           // slot IDs enabled this week
   loyaltyNftsRequired: number
+  /** M3: frozen once at LockGuarantee time, copied into every RentDatum inserted this week. */
+  guaranteePerSlot: Lovelace
 }
 
 /** Datum for the ListHead UTxO at rent_spend. Wraps WeekConfig + next pointer. */
@@ -135,6 +140,8 @@ export interface RentDatum {
   next: NodeKey;
   weekEnd: POSIXTime;
   loyaltyNftsRequired: number;
+  /** M3: copied from WeekConfig.guaranteePerSlot at insert time — authoritative for this slot's own week. */
+  guaranteePerSlot: Lovelace;
 }
 
 // ───────────────────────────────────────────────────────────────────
@@ -149,9 +156,12 @@ export type RentRedeemer =
   | { tag: 'CollectSlot' }                          // index 4
   | { tag: 'ResolveToCustomer' }                    // index 5
   | { tag: 'ResolveToOwner' }                       // index 6
+  /** M2: el nuevo Node puede crearse Pending (reserva 50%) o Confirmed (alquiler directo). */
   | { tag: 'InsertPrev'; newNext: NodeKey }          // index 7
   | { tag: 'RemovePrev'; newNext: NodeKey }          // index 8
-  | { tag: 'DeinitWeek' };                          // index 9
+  | { tag: 'DeinitWeek' }                           // index 9
+  | { tag: 'RedeemFree' }                           // index 10
+  | { tag: 'ForceClosePending' };                   // index 11
 
 // ───────────────────────────────────────────────────────────────────
 // OwnersDatum (OwnersValidator.hs — sum of two variants)
@@ -169,6 +179,8 @@ export interface CompanyConfig {
   /** Max disputes an owner can lose before being flagged. */
   maxDisputeLosses: number;
   companyPkh: PubKeyHash;
+  /** Mejora E — 2000 = 20%. guarantee_per_slot = rent_price × guaranteeBps / 10000. */
+  guaranteeBps: number;
 }
 
 export interface OwnerRecord {
@@ -190,12 +202,31 @@ export interface OwnerRecord {
   lat: BBS;
   long: BBS;
   paymentAddress: BBS;
+  /** Vestigial display value (M3) — authoritative guarantee accounting now lives on each RentDatum/WeekConfig. */
   guaranteePerSlot: bigint;
+  /** M3 — count of currently active (locked, not yet cleared) weeks; multiple concurrent weeks allowed. */
+  activeWeeksCount: number;
+  /** Mejora L — IANA timezone string, ej. "America/Guatemala". */
+  timezone: BBS;
+}
+
+/** Per (customer, cancha) stats — see CLAUDE.md "CustomerRecord". One record
+ *  per cancha a customer has interacted with, never a single global record,
+ *  so different customers (and a customer's own activity at OTHER canchas)
+ *  never compete to spend the same UTxO. */
+export interface CustomerRecord {
+  customerPkh: PubKeyHash;
+  ownerNFTName: TokenName;
+  rentalsCompleted: number;
+  rentalsCancelled: number;
+  disputesWon: number;
+  disputesLost: number;
 }
 
 export type OwnersDatum =
-  | { kind: 'Company'; config: CompanyConfig }   // index 0
-  | { kind: 'Owner'; record: OwnerRecord };      // index 1
+  | { kind: 'Company'; config: CompanyConfig }     // index 0
+  | { kind: 'Owner'; record: OwnerRecord }         // index 1
+  | { kind: 'Customer'; record: CustomerRecord };  // index 2
 
 // ───────────────────────────────────────────────────────────────────
 // OwnersRedeemer
@@ -206,7 +237,18 @@ export type OwnersRedeemer =
   | 'CollectPayments'       // index 1 · Tx 9
   | 'UpdateOwnerInfo'       // index 2 · Tx 10
   | 'ResolveToCustomer'     // index 3 · Tx 11
-  | 'ResolveToOwner';       // index 4 · Tx 12
+  | 'ResolveToOwner'        // index 4 · Tx 12
+  | 'LockGuarantee'         // index 5 · Mejora E — init-week
+  | 'ClearActiveWeek'       // index 6 · Mejora K — deinit-week
+  | 'DeregisterField'       // index 7 · Mejora J — deregister-owner
+  | { tag: 'UpdateCustomerRecord'; kind: CustomerStatKind };  // index 8
+
+/** Which CustomerRecord counter an UpdateCustomerRecord call bumps. */
+export type CustomerStatKind =
+  | 'RentalCompleted'   // index 0 · RedeemAtField, customer signs
+  | 'RentalCancelled'   // index 1 · CancelRent, customer signs
+  | 'DisputeWon'        // index 2 · ResolveToCustomer, company signs
+  | 'DisputeLost';      // index 3 · ResolveToOwner, company signs
 
 // ───────────────────────────────────────────────────────────────────
 // Minting redeemers

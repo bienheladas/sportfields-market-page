@@ -2,6 +2,7 @@ import * as React from 'react'
 import type { OwnerRecord } from './types'
 import type { ListHeadUtxo } from '../hooks/useRentSlots'
 import { useInitWeek, type DaySchedule, type InitWeekParams } from '../hooks/useInitWeek'
+import { useCompanyConfig } from '../hooks/useCompanyConfig'
 import { decodeBBS } from './lib'
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -40,8 +41,16 @@ function slotCount(s: DaySchedule[]): number {
   return s.reduce((n, d) => n + (d.enabled && d.close > d.open ? d.close - d.open : 0), 0)
 }
 
-function totalAdaNeeded(slots: number): number {
-  return slots * 2.1
+const MIN_UTXO_PER_SLOT_ADA = 2.1
+
+// Total ADA the owner needs to lock for the week: the fixed min-UTxO per slot
+// (constant, regardless of price) PLUS the guarantee (guaranteeBps% of
+// rent_price, per slot — see LockGuarantee in useInitWeek.ts). Previously this
+// only counted the min-UTxO, so the preview showed nearly the same number for
+// any rent_price — the guarantee itself was never included.
+function totalAdaNeeded(slots: number, priceAda: number, guaranteeBps: number): number {
+  const guaranteePerSlotAda = priceAda * guaranteeBps / 10000
+  return slots * (MIN_UTXO_PER_SLOT_ADA + guaranteePerSlotAda)
 }
 
 // ── Props ──────────────────────────────────────────────────────────
@@ -60,6 +69,8 @@ type Step = 'form' | 'confirm' | 'submitting' | 'done'
 
 export function InitWeekModal({ record, existingHeads, open, onClose, onDone }: InitWeekModalProps) {
   const { initWeek, loading, error } = useInitWeek()
+  const { config: companyConfig } = useCompanyConfig()
+  const guaranteeBps = companyConfig?.guaranteeBps ?? 2000
 
   const [step, setStep]           = React.useState<Step>('form')
   const [weekDate, setWeekDate]   = React.useState(nextMonday)
@@ -166,7 +177,7 @@ export function InitWeekModal({ record, existingHeads, open, onClose, onDone }: 
             cancelH={cancelH} setCancelH={setCancelH}
             schedule={schedule} setSchedule={setSchedule}
             slots={slots}
-            totalAda={totalAdaNeeded(slots)}
+            totalAda={totalAdaNeeded(slots, priceOk ? priceNum : 0, guaranteeBps)}
             canConfirm={canConfirm}
             onContinue={handleContinue}
           />
@@ -180,7 +191,8 @@ export function InitWeekModal({ record, existingHeads, open, onClose, onDone }: 
             cancelH={cancelNum}
             schedule={schedule}
             slots={slots}
-            totalAda={totalAdaNeeded(slots)}
+            totalAda={totalAdaNeeded(slots, priceNum, guaranteeBps)}
+            guaranteeBps={guaranteeBps}
             error={error}
             onBack={() => setStep('form')}
             onSubmit={handleSubmit}
@@ -357,13 +369,12 @@ function FormBody({
 // ── Confirm step ───────────────────────────────────────────────────
 
 function ConfirmBody({
-  weekDate, isoWeekLabel, priceAda, cancelH, schedule, slots, totalAda, error, onBack, onSubmit,
+  weekDate, isoWeekLabel, priceAda, cancelH, schedule, slots, totalAda, guaranteeBps, error, onBack, onSubmit,
 }: {
   weekDate: string; isoWeekLabel: string; priceAda: number; cancelH: number
-  schedule: DaySchedule[]; slots: number; totalAda: number
+  schedule: DaySchedule[]; slots: number; totalAda: number; guaranteeBps: number
   error: string | null; onBack: () => void; onSubmit: () => void
 }) {
-  const batches = Math.ceil(slots / 24)
   return (
     <div className="px-6 py-5 flex flex-col gap-4">
       <div className="bg-[var(--paper-2)] border border-[var(--line)] rounded-[10px] overflow-hidden">
@@ -374,14 +385,14 @@ function ConfirmBody({
             <SummaryRow k="Cancelación" v={`hasta ${cancelH}h antes`} />
             <SummaryRow k="Comisión plataforma" v="1%" />
             <SummaryRow k="Slots" v={String(slots)} mono />
-            <SummaryRow k="Transacciones" v={`${batches} tx (lotes de 24)`} mono />
             <SummaryRow k="ADA bloqueado" v={`~${totalAda.toFixed(1)} ₳`} mono />
           </tbody>
         </table>
       </div>
 
       <div className="text-[12px] text-[var(--muted)] bg-[var(--paper-2)] border border-[var(--line)] rounded-[10px] px-4 py-3">
-        Los 2.1 ₳ por slot son el min-UTxO y quedan bloqueados en RentValidator. Se recuperan cuando el slot expire o se liquide.
+        Por slot: 2.1 ₳ de min-UTxO (quedan bloqueados en RentValidator, se recuperan al expirar o liquidar el slot) + {(priceAda * guaranteeBps / 10000).toFixed(2)} ₳ de garantía
+        ({(guaranteeBps / 100).toFixed(0)}% del precio, se libera al cobrar cada turno).
       </div>
 
       {error && (
@@ -401,7 +412,7 @@ function ConfirmBody({
         </button>
         <button type="button" onClick={onSubmit}
           className="px-[18px] py-3 rounded-[10px] bg-[var(--accent)] hover:bg-[var(--accent-deep)] text-white font-semibold text-[14px]">
-          {error ? 'Reintentar' : `Confirmar · ${batches} tx`}
+          {error ? 'Reintentar' : 'Confirmar'}
         </button>
       </div>
     </div>
@@ -436,13 +447,13 @@ function DoneBody({ txHashes, onClose }: { txHashes: string[]; onClose: () => vo
       <div className="text-center">
         <h3 className="font-bold text-[20px] m-0 mb-1">¡Semana programada!</h3>
         <p className="text-[13px] text-[var(--muted)] m-0">
-          {txHashes.length} transacción{txHashes.length !== 1 ? 'es' : ''} confirmada{txHashes.length !== 1 ? 's' : ''}.
+          Transacción confirmada.
         </p>
       </div>
       <div className="w-full flex flex-col gap-1.5">
-        {txHashes.map((h, i) => (
+        {txHashes.map((h) => (
           <div key={h} className="bg-[var(--paper-2)] border border-[var(--line)] rounded-[10px] px-4 py-2.5 flex items-center justify-between gap-3">
-            <span className="text-[12px] font-mono text-[var(--ink)] truncate">Lote {i + 1}: {h}</span>
+            <span className="text-[12px] font-mono text-[var(--ink)] truncate">{h}</span>
             <a
               href={`https://preview.cardanoscan.io/transaction/${h}`}
               target="_blank"

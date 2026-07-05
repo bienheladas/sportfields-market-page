@@ -1,13 +1,18 @@
 // react/OwnerInfoForm.tsx
 // Form for Tx 10 (UpdateOwnerInfo). Only mutable fields per the validator:
-//   fieldName · address · phone · email · lat · long · paymentAddress
+//   fieldName · address · phone · email · lat · long · paymentAddress · timezone
 // Immutable fields (ownerPkh, ownerNFTName, all stats) are NOT editable here —
-// the validator rejects any tx that tries to change them.
+// the validator rejects any tx that tries to change them. timezone (Mejora L)
+// is not constrained by check_update_owner_info either, so it's editable too —
+// important since it anchors the weekly schedule (see init-week.mjs / useInitWeek.ts).
 
 import * as React from 'react';
 import type { OwnerRecord } from './types';
 import { decodeBBS } from './lib';
+import { timezoneFromLatLong } from '../lib/timezone';
 import { Label } from './atoms';
+
+const LATLONG_RE = /^-?\d+\.?\d*$/;
 
 export interface OwnerInfoFormProps {
   /** Current on-chain record (decoded). */
@@ -27,6 +32,7 @@ export interface MutableOwnerFields {
   lat: string;
   long: string;
   paymentAddress: string;
+  timezone: string;
 }
 
 export function OwnerInfoForm({ record, onSubmit, submitting }: OwnerInfoFormProps) {
@@ -38,10 +44,22 @@ export function OwnerInfoForm({ record, onSubmit, submitting }: OwnerInfoFormPro
     lat: decodeBBS(record.lat),
     long: decodeBBS(record.long),
     paymentAddress: decodeBBS(record.paymentAddress),
+    timezone: decodeBBS(record.timezone),
   }));
 
+  // timezone se deriva de lat/long en el propio setter (no es un campo libre) —
+  // ver nota en RegisterOwner.tsx sobre por qué texto libre quedó desincronizado
+  // de la ubicación real de la cancha.
   function set<K extends keyof MutableOwnerFields>(k: K, v: MutableOwnerFields[K]) {
-    setDraft((d) => ({ ...d, [k]: v }));
+    setDraft((d) => {
+      const next = { ...d, [k]: v };
+      if (k === 'lat' || k === 'long') {
+        next.timezone = LATLONG_RE.test(next.lat) && LATLONG_RE.test(next.long)
+          ? timezoneFromLatLong(parseFloat(next.lat), parseFloat(next.long))
+          : d.timezone;
+      }
+      return next;
+    });
   }
 
   const dirty = (Object.keys(draft) as (keyof MutableOwnerFields)[]).some(
@@ -74,7 +92,19 @@ export function OwnerInfoForm({ record, onSubmit, submitting }: OwnerInfoFormPro
         <Field label="paymentAddress" value={draft.paymentAddress} onChange={(v) => set('paymentAddress', v)} mono />
         <Field label="lat (BBS)" value={draft.lat} onChange={(v) => set('lat', v)} mono />
         <Field label="long (BBS)" value={draft.long} onChange={(v) => set('long', v)} mono />
+        <div className="col-span-2 flex flex-col gap-1.5">
+          <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--muted)] font-semibold">
+            timezone (derivado de lat/long)
+          </span>
+          <div className="px-3 py-2 rounded-[8px] border border-dashed border-[var(--line-strong)] bg-[var(--paper-2)] text-[13px] font-mono text-[var(--ink-2)]">
+            {draft.timezone || '—'}
+          </div>
+        </div>
       </div>
+      <p className="px-5 -mt-2 pb-3 text-[11px] text-[var(--muted)] leading-relaxed">
+        El horario de la semana (init-week) se ancla a medianoche en esta zona horaria, no UTC.
+        Cambiarla (editando lat/long) no afecta semanas ya inicializadas — solo aplica a las próximas.
+      </p>
 
       <footer className="px-5 py-3 border-t border-[var(--line)] bg-[var(--paper-2)] flex justify-end gap-2">
         <button
@@ -88,6 +118,7 @@ export function OwnerInfoForm({ record, onSubmit, submitting }: OwnerInfoFormPro
               lat: decodeBBS(record.lat),
               long: decodeBBS(record.long),
               paymentAddress: decodeBBS(record.paymentAddress),
+              timezone: decodeBBS(record.timezone),
             })
           }
           disabled={!dirty || submitting}

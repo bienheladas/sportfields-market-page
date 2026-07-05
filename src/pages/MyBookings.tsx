@@ -15,10 +15,10 @@ export default function MyBookings() {
   // Tab counts
   const counts = {
     all:       slots.length,
+    Pending:   slots.filter(s => s.datum.status === 'Pending').length,
     Confirmed: slots.filter(s => s.datum.status === 'Confirmed').length,
     Completed: slots.filter(s => s.datum.status === 'Completed').length,
     Disputed:  slots.filter(s => s.datum.status === 'Disputed').length,
-    Refunded:  slots.filter(s => s.datum.status === 'Refunded').length,
   }
 
   if (!connected) return (
@@ -58,13 +58,13 @@ export default function MyBookings() {
 
       {/* Tabs */}
       <div className="flex gap-0.5 border-b border-[var(--line)] mb-5">
-        {(['all', 'Confirmed', 'Completed', 'Disputed', 'Refunded'] as const).map(tab => {
+        {(['all', 'Pending', 'Confirmed', 'Completed', 'Disputed'] as const).map(tab => {
           const labels: Record<string, string> = {
             all:       'Todas',
+            Pending:   'Pendientes',
             Confirmed: 'Confirmadas',
             Completed: 'Jugadas',
             Disputed:  'Disputas',
-            Refunded:  'Reembolsadas',
           }
           const count = counts[tab as keyof typeof counts] ?? 0
           const active = filter === tab

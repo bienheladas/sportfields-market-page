@@ -66,6 +66,9 @@ export function useOpenDispute() {
         datum.long,
         datum.paymentAddress,
         nodeKeyConstr(datum.next),                  // next preserved
+        BigInt(datum.weekEnd),                       // week_end (campo 21 — faltaba)
+        BigInt(datum.loyaltyNftsRequired),           // loyalty_nfts_required (campo 22 — faltaba)
+        datum.guaranteePerSlot,                       // guarantee_per_slot (campo 23) — M3
       ])]))
 
       const continuingLovelace = slot.lovelace + DISPUTE_DEPOSIT
@@ -83,7 +86,7 @@ export function useOpenDispute() {
           { lovelace: continuingLovelace, [tokenUnit]: 1n },
         )
         .addSignerKey(customerPkh)
-        .validFrom(datum.cancelDeadline)
+        .validFrom(datum.cancelDeadline + 1000)  // after() es abierto: estrictamente posterior
         .complete()
 
       const signed = await tx.sign.withWallet().complete()

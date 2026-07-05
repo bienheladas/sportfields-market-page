@@ -2,50 +2,17 @@
 // next field preserved.
 
 import { useState } from 'react'
-import { Data, Constr, applyParamsToScript } from '@lucid-evolution/lucid'
+import { Data, Constr } from '@lucid-evolution/lucid'
 import { useLucid } from '../lib/LucidContext'
-import {
-  RENT_VALIDATOR_ADDR,
-  RENT_NFT_POLICY,
-  OWNER_NFT_POLICY,
-  RENT_SPEND_COMPILED,
-} from '../lib/config'
+import { RENT_VALIDATOR_ADDR, OWNERS_VALIDATOR_ADDR, RENT_NFT_POLICY } from '../lib/config'
 import { unwrapSubmitError } from '../lib/unwrapSubmitError'
-import { hexToBytes } from '../lib/decoders'
-
-function metaStr(s: string): string | string[] {
-  if (s.length <= 64) return s
-  const chunks: string[] = []
-  for (let i = 0; i < s.length; i += 64) chunks.push(s.slice(i, i + 64))
-  return chunks
-}
-
-function makeRentNftImage(): string[] {
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">` +
-    `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="96" gradientUnits="userSpaceOnUse">` +
-    `<stop offset="0%" stop-color="#f59e0b"/>` +
-    `<stop offset="100%" stop-color="#92400e"/>` +
-    `</linearGradient></defs>` +
-    `<rect width="96" height="96" rx="10" fill="url(#g)"/>` +
-    `<rect x="8" y="16" width="80" height="64" rx="2" stroke="rgba(255,255,255,.5)" stroke-width="1.5" fill="none"/>` +
-    `<line x1="48" y1="16" x2="48" y2="80" stroke="rgba(255,255,255,.5)" stroke-width="1.5"/>` +
-    `<circle cx="48" cy="48" r="12" stroke="rgba(255,255,255,.5)" stroke-width="1.5" fill="none"/>` +
-    `<circle cx="48" cy="48" r="2" fill="rgba(255,255,255,.7)"/>` +
-    `<rect x="8" y="33" width="14" height="30" stroke="rgba(255,255,255,.35)" stroke-width="1" fill="none"/>` +
-    `<rect x="74" y="33" width="14" height="30" stroke="rgba(255,255,255,.35)" stroke-width="1" fill="none"/>` +
-    `</svg>`
-  const dataUri = `data:image/svg+xml;base64,${btoa(svg)}`
-  const chunks: string[] = []
-  for (let i = 0; i < dataUri.length; i += 64) chunks.push(dataUri.slice(i, i + 64))
-  return chunks
-}
+import { getRentSpendRefUtxo, getOwnersSpendRefUtxo } from '../lib/refScripts'
+import {
+  findCustomerRecordUtxo, initialCustomerRecordDatum, bumpedCustomerRecordDatum,
+  updateCustomerRecordRedeemer, CUSTOMER_RECORD_MIN_LOVELACE,
+} from '../lib/customerRecord'
 import type { RentSlotUtxo } from './useRentSlots'
 import type { NodeKey } from '../components/types'
-
-const appliedRentSpend = applyParamsToScript(RENT_SPEND_COMPILED, [
-  new Constr(0, [OWNER_NFT_POLICY, RENT_NFT_POLICY])
-])
 
 function nodeKeyConstr(nk: NodeKey): Constr<Data> {
   return nk.tag === 'Empty' ? new Constr(1, []) : new Constr(0, [BigInt(nk.key)])
@@ -96,29 +63,32 @@ export function useRedeemAtField() {
         nodeKeyConstr(datum.next),                // next preserved
         BigInt(datum.weekEnd),                    // week_end
         BigInt(datum.loyaltyNftsRequired),        // loyalty_nfts_required
+        datum.guaranteePerSlot,                    // guarantee_per_slot — M3
       ])]))
 
-      // Window closes at week_end (improvement A)
-      const validToMs = Math.min(Date.now() + 10 * 60_000, datum.weekEnd - 1)
-      const fieldNameText = new TextDecoder().decode(hexToBytes(datum.fieldName))
-      const rentNftImage = makeRentNftImage()
+      // Window: opens slot_start-15min, closes at week_end (improvement A).
+      // after()/before() are open intervals — stay strictly inside the bounds.
+      const validFromMs = datum.slotStart - 15 * 60_000 + 1000
+      const validToMs   = Math.min(Date.now() + 10 * 60_000, datum.weekEnd - 1000)
 
-      const tx = await lucid.newTx()
+      // CustomerRecord (per cancha) — bump rentals_completed. No redeemer/auth
+      // needed to create the first one (see lib/customerRecord.ts).
+      const existingRecord = await findCustomerRecordUtxo(customerPkh, datum.ownerNFTName)
+
+      const [rentSpendRefUtxo, ownersSpendRefUtxo] = await Promise.all([
+        getRentSpendRefUtxo(lucid), getOwnersSpendRefUtxo(lucid),
+      ])
+
+      let txBuilder = lucid.newTx()
+        .readFrom([rentSpendRefUtxo, ownersSpendRefUtxo])
         .collectFrom(
           [{ txHash: slot.txHash, outputIndex: slot.outputIndex, address: slot.address,
              assets: { lovelace: slot.lovelace, [tokenUnit]: 1n }, datum: slot.rawDatum }],
           spendRedeemer,
         )
-        .attach.SpendingValidator({ type: 'PlutusV3', script: appliedRentSpend })
-        .attachMetadata(721, {
-          [RENT_NFT_POLICY]: {
-            [datum.rentNFTName!]: {
-              name: metaStr(`${fieldNameText} — Comprobante`),
-              description: metaStr(`Token de lealtad por reserva en "${fieldNameText}". Sportfields.`),
-              image: rentNftImage,
-            },
-          },
-        })
+        // CIP-25 metadata (721) is attached at mint time — see useReserveSlot.ts /
+        // useConfirmRent.ts. This tx only transfers an already-minted token, so
+        // metadata here wouldn't be indexed by wallets.
         // NFT transferred to customer wallet as loyalty token (not burned)
         .pay.ToAddress(customerAddr, { lovelace: 2_000_000n, [tokenUnit]: 1n })
         .pay.ToContract(
@@ -127,8 +97,32 @@ export function useRedeemAtField() {
           { lovelace: slot.lovelace },
         )
         .addSignerKey(customerPkh)
+        .validFrom(validFromMs)
         .validTo(validToMs)
-        .complete()
+
+      if (existingRecord) {
+        txBuilder = txBuilder
+          .collectFrom(
+            [{ txHash: existingRecord.tx_hash, outputIndex: existingRecord.output_index,
+               address: OWNERS_VALIDATOR_ADDR,
+               assets: { lovelace: BigInt(existingRecord.amount.find(a => a.unit === 'lovelace')?.quantity ?? '0') },
+               datum: existingRecord.inline_datum! }],
+            updateCustomerRecordRedeemer('RentalCompleted'),
+          )
+          .pay.ToContract(
+            OWNERS_VALIDATOR_ADDR,
+            { kind: 'inline', value: bumpedCustomerRecordDatum(existingRecord.inline_datum!, 'RentalCompleted') },
+            { lovelace: BigInt(existingRecord.amount.find(a => a.unit === 'lovelace')?.quantity ?? '0') },
+          )
+      } else {
+        txBuilder = txBuilder.pay.ToContract(
+          OWNERS_VALIDATOR_ADDR,
+          { kind: 'inline', value: initialCustomerRecordDatum(customerPkh, datum.ownerNFTName, 'RentalCompleted') },
+          { lovelace: CUSTOMER_RECORD_MIN_LOVELACE },
+        )
+      }
+
+      const tx = await txBuilder.complete()
 
       const signed = await tx.sign.withWallet().complete()
       return await signed.submit()

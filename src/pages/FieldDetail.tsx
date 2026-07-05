@@ -4,7 +4,7 @@
 //
 // Datos:
 //   useRentSlots(ownerNFT)      → todos los slots de esta cancha
-//   useOwnerRecord(ownerPkh)    → stats de reputación + metadata canónica
+//   useOwnerRecord(ownerNFTName) → stats de reputación + metadata canónica
 //   useLucid()                  → estado de la wallet del visitante
 //
 // Identidad del viewer: pkh extraído directamente de useLucid().
@@ -79,8 +79,11 @@ export default function FieldDetail() {
     return slots.filter(s => s.datum.weekEnd === weekEnd && s.datum.fieldName === head.datum.fieldName);
   }, [slots, head]);
 
-  const ownerPkh = head?.datum.ownerPkh ?? slots?.[0]?.datum.ownerPkh ?? '';
-  const { record, loading: recordLoading } = useOwnerRecord(ownerPkh);
+  // Must look up by ownerNFTName, not ownerPkh — a wallet can own multiple
+  // fields, and web registrations mint ownerNFTName = ownerPkh + random
+  // suffix (different from ownerPkh) — see useOwnerRecord.ts.
+  const ownerNFTNameForRecord = head?.datum.ownerNFTName ?? slots?.[0]?.datum.ownerNFTName ?? '';
+  const { record, loading: recordLoading } = useOwnerRecord(ownerNFTNameForRecord);
 
   const [selected, setSelected] = React.useState<RentSlotUtxoLike | null>(null);
   const [walletModalOpen, setWalletModalOpen] = React.useState(false);
@@ -266,6 +269,7 @@ export default function FieldDetail() {
             weekIdx={weekIdx}
             totalWeeks={sortedHeads.length}
             head={head}
+            timeZone={record?.timezone}
             onPrev={() => setWeekIdx(i => Math.max(0, i - 1))}
             onNext={() => setWeekIdx(i => Math.min(sortedHeads.length - 1, i + 1))}
           />
@@ -317,6 +321,7 @@ export default function FieldDetail() {
         slot={selected}
         connected={connected}
         viewerPkh={viewerPkh || null}
+        timeZone={record?.timezone}
         onClose={() => setSelected(null)}
         onConnectWallet={() => setWalletModalOpen(true)}
         onReserve={async (s) => {
@@ -568,18 +573,20 @@ function WeekNav({
   weekIdx,
   totalWeeks,
   head,
+  timeZone,
   onPrev,
   onNext,
 }: {
   weekIdx: number;
   totalWeeks: number;
   head: ListHeadUtxo | null;
+  timeZone?: string;
   onPrev: () => void;
   onNext: () => void;
 }) {
   const canPrev = weekIdx > 0;
   const canNext = weekIdx < totalWeeks - 1;
-  const label = head ? weekLabel(head.datum.config.weekStartPosix) : '—';
+  const label = head ? weekLabel(head.datum.config.weekStartPosix, timeZone || 'UTC') : '—';
   const btnCls = (enabled: boolean) =>
     [
       'w-8 h-8 border border-[var(--line-strong)] bg-[var(--paper)] rounded-lg grid place-items-center',
@@ -607,9 +614,9 @@ function WeekNav({
   );
 }
 
-function weekLabel(weekStartPosix: number): string {
+function weekLabel(weekStartPosix: number, timeZone: string): string {
   const fmt = (ts: number) =>
-    new Date(ts).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+    new Date(ts).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', timeZone })
   return `${fmt(weekStartPosix)} – ${fmt(weekStartPosix + 6 * 24 * 3_600_000)}`
 }
 

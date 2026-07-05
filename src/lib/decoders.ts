@@ -1,7 +1,7 @@
 // CBOR → TS type decoders for on-chain datums.
 // Uses the same cbor tag conventions as plutus-cbor.mjs.
 
-import type { RentDatum, OwnerRecord, CompanyConfig, OwnersDatum, SlotStatus, NodeKey, WeekConfig, ListHeadDatum } from '../components/types'
+import type { RentDatum, OwnerRecord, CompanyConfig, CustomerRecord, OwnersDatum, SlotStatus, NodeKey, WeekConfig, ListHeadDatum } from '../components/types'
 import { SLOT_STATUS_BY_TAG } from '../components/types'
 import { bech32 } from 'bech32'
 
@@ -170,7 +170,7 @@ function asArray(v: CborValue): CborValue[] {
   return arr
 }
 
-// SlotStatus: Available=0(121) Pending=1(122) Confirmed=2(123) Completed=3(124) Refunded=4(125) Disputed=5(126)
+// SlotStatus: Available=0(121) Pending=1(122) Confirmed=2(123) Completed=3(124) [unused](125) Disputed=5(126)
 function decodeSlotStatus(v: CborValue): SlotStatus {
   const t = asTag(v)
   const idx = t.tag - 121
@@ -209,6 +209,7 @@ function decodeWeekConfig(v: CborValue): WeekConfig {
     siteCommissionBps:         Number(asInt(f[4])),
     openSlotIds,
     loyaltyNftsRequired:       Number(asInt(f[6])),
+    guaranteePerSlot:          asInt(f[7]),
   }
 }
 
@@ -264,6 +265,7 @@ export function decodeRentDatum(hex: string): RentDatum | null {
     next:                decodeNodeKey(fields[20]),
     weekEnd:             Number(asInt(fields[21])),
     loyaltyNftsRequired: Number(asInt(fields[22])),
+    guaranteePerSlot:    asInt(fields[23]),
   }
 }
 
@@ -281,6 +283,7 @@ export function decodeOwnersDatum(hex: string): OwnersDatum {
       collateral:        asInt(f[3]),
       maxDisputeLosses:  Number(asInt(f[4])),
       companyPkh:        bytesToHex(asBytes(f[5])),
+      guaranteeBps:      Number(asInt(f[6])),
     }
     return { kind: 'Company', config }
   }
@@ -304,8 +307,25 @@ export function decodeOwnersDatum(hex: string): OwnersDatum {
       long:              bytesToHex(asBytes(f[11])),
       paymentAddress:    bytesToHex(asBytes(f[12])),
       guaranteePerSlot:  asInt(f[13]),
+      activeWeeksCount:  Number(asInt(f[14])),
+      timezone:          bytesToUtf8(asBytes(f[15])),
     }
     return { kind: 'Owner', record }
+  }
+
+  if (outer.tag === 123) {
+    // DatumCustomer (index 2) — outer.value is array([innerConstr])
+    const inner = asTag(asArray(outer.value)[0], 121)
+    const f = asArray(inner.value)
+    const record: CustomerRecord = {
+      customerPkh:       bytesToHex(asBytes(f[0])),
+      ownerNFTName:      bytesToHex(asBytes(f[1])),
+      rentalsCompleted:  Number(asInt(f[2])),
+      rentalsCancelled:  Number(asInt(f[3])),
+      disputesWon:       Number(asInt(f[4])),
+      disputesLost:      Number(asInt(f[5])),
+    }
+    return { kind: 'Customer', record }
   }
 
   throw new Error(`Unknown OwnersDatum tag ${outer.tag}`)
