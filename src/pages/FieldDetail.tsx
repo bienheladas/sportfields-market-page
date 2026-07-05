@@ -46,10 +46,13 @@ export default function FieldDetail() {
   const { slots, heads, loading: slotsLoading, error: slotsError, reload } = useRentSlots(ownerNFT);
 
   // ── Semanas disponibles (una head por semana inicializada) ──
+  // Las semanas ya terminadas se excluyen: solo el owner las ve (en su panel, para cerrarlas)
   const sortedHeads = React.useMemo(() => {
-    const filtered = fieldNameFilter
-      ? heads.filter(h => h.datum.fieldName === fieldNameFilter)
-      : heads
+    const now = Date.now()
+    const filtered = heads.filter(h =>
+      h.datum.config.weekStartPosix + 7 * 24 * 3_600_000 > now &&
+      (!fieldNameFilter || h.datum.fieldName === fieldNameFilter)
+    )
     return [...filtered].sort((a, b) => a.datum.config.weekStartPosix - b.datum.config.weekStartPosix)
   }, [heads, fieldNameFilter]);
 
@@ -72,9 +75,9 @@ export default function FieldDetail() {
 
   const head = sortedHeads[weekIdx] ?? null;
 
-  // Slots filtrados por la semana seleccionada
+  // Slots filtrados por la semana seleccionada (sin semana vigente no hay nada reservable)
   const weekSlots = React.useMemo(() => {
-    if (!head) return slots;
+    if (!head) return [];
     const weekEnd = head.datum.config.weekStartPosix + 7 * 24 * 3_600_000;
     return slots.filter(s => s.datum.weekEnd === weekEnd && s.datum.fieldName === head.datum.fieldName);
   }, [slots, head]);

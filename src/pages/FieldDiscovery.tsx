@@ -25,10 +25,15 @@ function slotMatchesFilter(slotId: number, filter: SlotFilter): boolean {
   return true;
 }
 
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
 export function groupBySummary(slots: RentDatum[], headUtxos: ListHeadUtxo[], filter: SlotFilter): FieldSummary[] {
-  // Deduplicate heads by txHash (protects against double init-week runs)
+  // Deduplicate heads by txHash (protects against double init-week runs).
+  // Weeks already ended are only relevant to owners (deinit) — hide them here.
+  const now = Date.now();
   const seen = new Set<string>();
   const heads = headUtxos.filter(u => {
+    if (u.datum.config.weekStartPosix + WEEK_MS <= now) return false;
     if (seen.has(u.txHash)) return false;
     seen.add(u.txHash);
     return true;
