@@ -26,11 +26,24 @@ const memoryStorage: SeedStorage = {
   async clear() { memorySeed = null },
 }
 
+const SEED_KEY = 'sportfields-seed'
+
+// En la app nativa la seed persiste en Keychain (iOS) / Keystore-cifrado (Android).
+// El plugin se carga con import() dinámico: el bundle web nunca lo incluye.
+// isNativePlatform() real (no el fallback ?app=1) — en browser no hay secure storage.
+async function nativeSecureStorage(): Promise<SeedStorage> {
+  const { SecureStorage } = await import('@aparajita/capacitor-secure-storage')
+  return {
+    async load() { return await SecureStorage.getItem(SEED_KEY) },
+    async save(seed: string) { await SecureStorage.setItem(SEED_KEY, seed) },
+    async clear() { await SecureStorage.remove(SEED_KEY) },
+  }
+}
+
 export async function getSeedStorage(): Promise<SeedStorage> {
-  if (isNativeApp()) {
-    // TODO Q4: import() dinámico del plugin de secure storage (Keychain/Keystore + biometría).
-    // Hasta entonces la app nativa también usa memoria (la seed se re-tipea en cada arranque).
-    return memoryStorage
+  const cap = (window as any).Capacitor
+  if (isNativeApp() && cap?.isNativePlatform?.()) {
+    return await nativeSecureStorage()
   }
   return memoryStorage
 }

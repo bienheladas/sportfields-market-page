@@ -48,7 +48,15 @@ export function WalletScreen() {
   React.useEffect(() => { loadBalance() }, [loadBalance])
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(address)
+    // En la app nativa, el plugin de Capacitor (navigator.clipboard es poco fiable
+    // dentro del WebView de Android); en browser, la API estándar.
+    const cap = (window as any).Capacitor
+    if (cap?.isNativePlatform?.()) {
+      const { Clipboard } = await import('@capacitor/clipboard')
+      await Clipboard.write({ string: address })
+    } else {
+      await navigator.clipboard.writeText(address)
+    }
     setCopied(true)
     setTimeout(() => setCopied(false), 1800)
   }

@@ -10,6 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/clipboard": "^8.0.1",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/geolocation": "^8.2.0",
     "@lucid-evolution/lucid": "^0.4.24",
     "axios": "^1.16.1",
     "leaflet": "^1.9.4",

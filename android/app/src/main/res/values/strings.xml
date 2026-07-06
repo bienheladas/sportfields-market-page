@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Sportfields</string>
+    <string name="title_activity_main">Sportfields</string>
+    <string name="package_name">com.sportfields.app</string>
+    <string name="custom_url_scheme">com.sportfields.app</string>
+</resources>

@@ -27,14 +27,25 @@ export function RedeemScreen() {
     return () => clearInterval(id)
   }, [])
 
-  // Posición del dispositivo (best effort — si el usuario la niega, simplemente no se advierte)
+  // Posición del dispositivo (best effort — si el usuario la niega, simplemente no se advierte).
+  // En la app nativa se usa el plugin de Capacitor (maneja el prompt de permisos de Android/iOS,
+  // cosa que navigator.geolocation no hace dentro del WebView); en browser, la API estándar.
   React.useEffect(() => {
-    if (!navigator.geolocation) return
-    navigator.geolocation.getCurrentPosition(
-      p => setPos({ lat: p.coords.latitude, long: p.coords.longitude }),
-      () => { /* sin permiso o sin señal — la advertencia de distancia se omite */ },
-      { enableHighAccuracy: true, timeout: 10_000 },
-    )
+    let cancelled = false
+    const cap = (window as any).Capacitor
+    if (cap?.isNativePlatform?.()) {
+      import('@capacitor/geolocation')
+        .then(({ Geolocation }) => Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10_000 }))
+        .then(p => { if (!cancelled) setPos({ lat: p.coords.latitude, long: p.coords.longitude }) })
+        .catch(() => { /* sin permiso o sin señal — la advertencia de distancia se omite */ })
+    } else if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        p => { if (!cancelled) setPos({ lat: p.coords.latitude, long: p.coords.longitude }) },
+        () => { /* sin permiso o sin señal — la advertencia de distancia se omite */ },
+        { enableHighAccuracy: true, timeout: 10_000 },
+      )
+    }
+    return () => { cancelled = true }
   }, [])
 
   const confirmed = slots.filter(s => s.datum.status === 'Confirmed')

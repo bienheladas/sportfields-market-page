@@ -1,0 +1,7 @@
+# Coolify solo construye/sirve la web (dist/ vía vite build) — los proyectos
+# nativos de Capacitor no participan del deploy web y engordan el build context.
+android/
+ios/
+node_modules/
+dist/
+*.log
