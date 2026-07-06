@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { getAddressDetails } from '@lucid-evolution/lucid'
 import { getLucid } from './lucid'
 
 type LucidInstance = Awaited<ReturnType<typeof getLucid>>
@@ -27,6 +26,9 @@ export function LucidProvider({ children }: { children: React.ReactNode }) {
   const connectWallet = React.useCallback(async (name: string) => {
     const api = await (window as any).cardano[name].enable()
     const l = await getLucid()
+    // Q0: getAddressDetails viene del paquete pesado — import dinámico (ya cargado
+    // de todas formas por getLucid, así que no cuesta una descarga extra).
+    const { getAddressDetails } = await import('@lucid-evolution/lucid')
     l.selectWallet.fromAPI(api)
     const addr = await l.wallet().address()
     const details = getAddressDetails(addr)
@@ -42,6 +44,7 @@ export function LucidProvider({ children }: { children: React.ReactNode }) {
   // Deriva la cuenta 0 (m/1852'/1815'/0'/0/0), la misma que Lace por defecto.
   const connectWithSeed = React.useCallback(async (seed: string) => {
     const l = await getLucid()
+    const { getAddressDetails } = await import('@lucid-evolution/lucid')
     l.selectWallet.fromSeed(seed)
     const addr = await l.wallet().address()
     const details = getAddressDetails(addr)
