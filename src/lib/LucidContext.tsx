@@ -11,6 +11,7 @@ interface LucidContextValue {
   pkh: string
   walletName: string
   connectWallet: (walletName: string) => Promise<void>
+  connectWithSeed: (seed: string) => Promise<void>
   disconnect: () => void
 }
 
@@ -37,6 +38,21 @@ export function LucidProvider({ children }: { children: React.ReactNode }) {
     setWalletName(name)
   }, [])
 
+  // Mejora Q: wallet embebida — misma sesión que CIP-30 pero firmando con la seed local.
+  // Deriva la cuenta 0 (m/1852'/1815'/0'/0/0), la misma que Lace por defecto.
+  const connectWithSeed = React.useCallback(async (seed: string) => {
+    const l = await getLucid()
+    l.selectWallet.fromSeed(seed)
+    const addr = await l.wallet().address()
+    const details = getAddressDetails(addr)
+    const paymentHash = details.paymentCredential?.hash ?? ''
+    setLucid(l)
+    setConnected(true)
+    setAddress(addr)
+    setPkh(paymentHash)
+    setWalletName('embedded')
+  }, [])
+
   const disconnect = React.useCallback(() => {
     setConnected(false)
     setAddress('')
@@ -52,6 +68,7 @@ export function LucidProvider({ children }: { children: React.ReactNode }) {
     pkh,
     walletName,
     connectWallet,
+    connectWithSeed,
     disconnect,
   }
 
