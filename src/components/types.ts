@@ -160,8 +160,8 @@ export type RentRedeemer =
   | { tag: 'InsertPrev'; newNext: NodeKey }          // index 7
   | { tag: 'RemovePrev'; newNext: NodeKey }          // index 8
   | { tag: 'DeinitWeek' }                           // index 9
-  | { tag: 'RedeemFree' }                           // index 10
-  | { tag: 'ForceClosePending' };                   // index 11
+  /** U (2026-07-07): RedeemFree eliminado — el canje de lealtad es un camino de InsertPrev. */
+  | { tag: 'ForceClosePending' };                   // index 10 (era 11)
 
 // ───────────────────────────────────────────────────────────────────
 // OwnersDatum (OwnersValidator.hs — sum of two variants)
@@ -208,6 +208,10 @@ export interface OwnerRecord {
   activeWeeksCount: number;
   /** Mejora L — IANA timezone string, ej. "America/Guatemala". */
   timezone: BBS;
+  /** P — contabilidad de garantía por semana: (week_end → lovelace bloqueado restante). */
+  lockedWeeks: [bigint, bigint][];
+  /** V — renta cobrada sin comisionar por semana: (week_end → lovelace acumulado). */
+  uncommissionedWeeks: [bigint, bigint][];
 }
 
 /** Per (customer, cancha) stats — see CLAUDE.md "CustomerRecord". One record

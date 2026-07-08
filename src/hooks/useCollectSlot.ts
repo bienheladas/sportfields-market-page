@@ -108,18 +108,31 @@ export function useCollectSlot() {
       const ownerLovelace = BigInt(ownerStatsRaw.amount.find(a => a.unit === 'lovelace')?.quantity ?? '0')
       const rec = ownerRecord.record
 
-      // Updated OwnerRecord: rentals_completed + 1 — preserve all 16 fields generically
-      // (including active_week/timezone, fields 14-15, Mejoras K/L) rather than hardcoding a subset.
+      // Updated OwnerRecord: rentals_completed + 1 — preserve all 18 fields generically.
       const rawOwnerDatum = Data.from(ownerStatsRaw.inline_datum!) as Constr<Data>
       const innerRecord = rawOwnerDatum.fields[0] as Constr<Data>
       const newRecordFields = [...innerRecord.fields]
       newRecordFields[2] = BigInt(rec.rentalsCompleted) + 1n
+
+      // P: liberación exacta contra la entry de la semana (locked_weeks, campo 16)
+      const weekEndKey  = BigInt(datum.weekEnd)
+      const min2n       = (a: bigint, b: bigint) => a <= b ? a : b
+      const lockedWeeks = (innerRecord.fields[16] ?? new Map()) as Map<bigint, bigint>
+      const uncommWeeks = (innerRecord.fields[17] ?? new Map()) as Map<bigint, bigint>
+      const lockedEntry = lockedWeeks.get(weekEndKey) ?? 0n
+      const release     = min2n(min2n(datum.guaranteePerSlot, lockedEntry), ownerLovelace - 2_000_000n)
+      const mapSet = (m: Map<bigint, bigint>, k: bigint, v: bigint) =>
+        new Map([...m].map(([kk, vv]) => kk === k ? [kk, v] as [bigint, bigint] : [kk, vv] as [bigint, bigint]))
+      newRecordFields[16] = mapSet(lockedWeeks, weekEndKey, lockedEntry - release)
+
+      // V: comisión sobre el acumulado semanal con carry (uncommissioned_weeks, campo 17)
+      const carry             = (uncommWeeks.get(weekEndKey) ?? 0n) + datum.rentPrice
+      const commissionDue     = carry * BigInt(datum.siteCommissionBps) / 10000n
+      const commissionPayable = commissionDue >= MIN_COMMISSION_LOVELACE
+      newRecordFields[17] = mapSet(uncommWeeks, weekEndKey, commissionPayable ? 0n : carry)
+
       const updatedOwnerDatum = Data.to(new Constr(1, [new Constr(0, newRecordFields)]))
 
-      // Mejora M: comisión condonada si < 1 ADA (costaría más en minUTxO que lo que vale).
-      // collect-slot exige after(week_end) siempre, sea o no condonada la comisión.
-      const commission = datum.rentPrice * BigInt(datum.siteCommissionBps) / 10000n
-      const commissionForgiven = commission > 0n && commission < MIN_COMMISSION_LOVELACE
       const nowMs = Date.now()
       if (nowMs <= datum.weekEnd)
         throw new Error(`Solo se puede cobrar después de week_end (${new Date(datum.weekEnd).toISOString()})`)
@@ -162,18 +175,17 @@ export function useCollectSlot() {
         .pay.ToContract(
           OWNERS_VALIDATOR_ADDR,
           { kind: 'inline', value: updatedOwnerDatum },
-          // M3: release THIS slot's own guarantee_per_slot (frozen at insert time from
-          // its week's WeekConfig), not the stats scalar — matches the on-chain check,
-          // which sums guarantee_per_slot from the rent_spend slot input(s) in tx.inputs.
-          { lovelace: ownerLovelace - datum.guaranteePerSlot },
+          // P: liberación exacta — el pozo baja exactamente lo liberado (clampeado)
+          { lovelace: ownerLovelace - release },
         )
         // G: NFT pass-through — return to wallet (proves NFT ownership on-chain)
         .pay.ToAddress(walletAddr, { lovelace: nftWalletUtxo.assets.lovelace, [fieldNftUnit]: 1n })
         .addSignerKey(ownerPkh)
         .validFrom(datum.weekEnd + 1000)  // after() es abierto: estrictamente posterior a week_end
 
-      if (!commissionForgiven) {
-        txBuilder = txBuilder.pay.ToAddress(COMPANY_ADDR, { lovelace: commission })
+      // V: comisión semanal — se paga solo cuando el carry cruza el umbral
+      if (commissionPayable) {
+        txBuilder = txBuilder.pay.ToAddress(COMPANY_ADDR, { lovelace: commissionDue })
       }
 
       const tx = await txBuilder.complete()

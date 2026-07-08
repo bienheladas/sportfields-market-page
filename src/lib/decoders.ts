@@ -269,6 +269,12 @@ export function decodeRentDatum(hex: string): RentDatum | null {
   }
 }
 
+// P/V: campos 16/17 del OwnerRecord — Plutus Map Int→Int (orden preservado)
+function asWeekPairs(v: CborValue | undefined): [bigint, bigint][] {
+  if (v === undefined || !isCborMap(v)) return []
+  return v.entries.map(([k, val]) => [asInt(k), asInt(val)])
+}
+
 export function decodeOwnersDatum(hex: string): OwnersDatum {
   const outer = asTag(readCborHex(hex))
 
@@ -309,6 +315,8 @@ export function decodeOwnersDatum(hex: string): OwnersDatum {
       guaranteePerSlot:  asInt(f[13]),
       activeWeeksCount:  Number(asInt(f[14])),
       timezone:          bytesToUtf8(asBytes(f[15])),
+      lockedWeeks:        asWeekPairs(f[16]),  // P — (week_end → garantía restante)
+      uncommissionedWeeks: asWeekPairs(f[17]), // V — (week_end → renta sin comisionar)
     }
     return { kind: 'Owner', record }
   }

@@ -120,6 +120,15 @@ export function useInitWeek() {
         const newRecordFields = [...innerRecord.fields]
         newRecordFields[13] = guaranteePerSlot
         newRecordFields[14] = (innerRecord.fields[14] as bigint) + 1n  // active_weeks_count++ (M3)
+        // P/V: entries contables de la semana nueva — PREPEND (el on-chain compara
+        // igualdad exacta contra add_locked_week). Semana duplicada = rechazada.
+        const weekEndKey  = BigInt(weekStartMs) + 604_800_000n
+        const lockedWeeks = (innerRecord.fields[16] ?? new Map()) as Map<bigint, bigint>
+        const uncommWeeks = (innerRecord.fields[17] ?? new Map()) as Map<bigint, bigint>
+        if ((lockedWeeks.get(weekEndKey) ?? 0n) !== 0n)
+          throw new Error('Ya existe una semana activa con ese week_end — semana duplicada.')
+        newRecordFields[16] = new Map([[weekEndKey, guaranteeTotal], ...lockedWeeks])
+        newRecordFields[17] = new Map([[weekEndKey, 0n], ...uncommWeeks])
         const newStatsDatum = Data.to(new Constr(1, [new Constr(0, newRecordFields)]))
 
         // WeekConfig = Constr(0, [week_start_posix, slot_duration_ms, cancel_deadline_offset_ms,

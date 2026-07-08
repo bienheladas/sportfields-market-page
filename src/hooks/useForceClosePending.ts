@@ -93,7 +93,8 @@ export function useForceClosePending() {
       const newPredDatum = rebuildPredDatum(predRawDatum, nodeKeyConstr(datum.next))
 
       const removePrevRedeemer        = Data.to(new Constr(8, [nodeKeyConstr(datum.next)]))  // RemovePrev
-      const forceClosePendingRedeemer = Data.to(new Constr(11, []))                           // ForceClosePending
+      // U (2026-07-07): RedeemFree eliminado del contrato — ForceClosePending bajó de Constr 11 a 10
+      const forceClosePendingRedeemer = Data.to(new Constr(10, []))                          // ForceClosePending
 
       const tx = await lucid.newTx()
         .collectFrom([predUtxo], removePrevRedeemer)

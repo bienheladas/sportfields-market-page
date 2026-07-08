@@ -4,8 +4,10 @@
 // activa menos los slots ya ocupados (nodos de esa semana) y los que ya empezaron.
 
 import * as React from 'react'
+import { useLucid } from '../lib/LucidContext'
 import { useRentSlots, type ListHeadUtxo } from '../hooks/useRentSlots'
 import { useReserveSlot } from '../hooks/useReserveSlot'
+import { loyaltyNftUnit } from '../lib/loyalty'
 import { decodeBBS, formatAda, slotIdToCoord } from '../components/lib'
 
 const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
@@ -144,13 +146,28 @@ function WeekSlots({ head, availableIds, onReserved }: {
   availableIds: number[]
   onReserved: () => void
 }) {
+  const { lucid, pkh } = useLucid()
   const { reserve, loading } = useReserveSlot()
   const [chosen, setChosen] = React.useState<number | null>(null)
   const [txHash, setTxHash] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+  const [loyaltyBalance, setLoyaltyBalance] = React.useState(0n)
 
   const cfg = head.datum.config
   const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+  // U: balance de NFTs de lealtad de esta cancha — habilita "canjear" al llegar a N
+  React.useEffect(() => {
+    if (!lucid || !pkh || cfg.loyaltyNftsRequired === 0) return
+    let cancelled = false
+    const unit = loyaltyNftUnit(head.datum.ownerNFTName, pkh)
+    lucid.wallet().getUtxos()
+      .then(us => { if (!cancelled) setLoyaltyBalance(us.reduce((s, u) => s + (u.assets[unit] ?? 0n), 0n)) })
+      .catch(() => { /* balance es cosmético para habilitar el botón */ })
+    return () => { cancelled = true }
+  }, [lucid, pkh, head.datum.ownerNFTName, cfg.loyaltyNftsRequired])
+
+  const canPayWithLoyalty = cfg.loyaltyNftsRequired > 0 && loyaltyBalance >= BigInt(cfg.loyaltyNftsRequired)
 
   // Agrupar los slots disponibles por día de la semana
   const byDay = React.useMemo(() => {
@@ -167,11 +184,11 @@ function WeekSlots({ head, availableIds, onReserved }: {
     timeZone: deviceTz, day: 'numeric', month: 'short',
   })
 
-  const handleReserve = async () => {
+  const handleReserve = async (payWithLoyalty: boolean) => {
     if (chosen === null) return
     setError(null)
     try {
-      const hash = await reserve(head, chosen)
+      const hash = await reserve(head, chosen, { payWithLoyalty })
       setTxHash(hash)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -240,16 +257,28 @@ function WeekSlots({ head, availableIds, onReserved }: {
       )}
 
       {chosen !== null && (
-        <button
-          type="button"
-          disabled={loading}
-          onClick={handleReserve}
-          className="w-full py-2.5 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-deep)] text-white text-[14px] font-semibold transition-colors disabled:opacity-50"
-        >
-          {loading
-            ? 'Firmando y enviando…'
-            : `Reservar ${DAYS_ES[slotIdToCoord(chosen).day]} ${String(slotIdToCoord(chosen).hour).padStart(2, '0')}:00 — pagar ${formatAda(cfg.rentPrice)}`}
-        </button>
+        <>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => handleReserve(false)}
+            className="w-full py-2.5 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-deep)] text-white text-[14px] font-semibold transition-colors disabled:opacity-50"
+          >
+            {loading
+              ? 'Firmando y enviando…'
+              : `Reservar ${DAYS_ES[slotIdToCoord(chosen).day]} ${String(slotIdToCoord(chosen).hour).padStart(2, '0')}:00 — pagar ${formatAda(cfg.rentPrice)}`}
+          </button>
+          {canPayWithLoyalty && (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => handleReserve(true)}
+              className="w-full py-2.5 rounded-xl bg-[var(--paper)] border border-[var(--accent)] text-[var(--accent-deep)] text-[14px] font-semibold transition-colors disabled:opacity-50"
+            >
+              {`Canjear con ${cfg.loyaltyNftsRequired} NFTs de lealtad — gratis`}
+            </button>
+          )}
+        </>
       )}
     </section>
   )

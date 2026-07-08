@@ -4,7 +4,8 @@ import { useCancelRent } from '../hooks/useCancelRent'
 import { useConfirmRent } from '../hooks/useConfirmRent'
 import { useOpenDispute } from '../hooks/useOpenDispute'
 import { useRedeemAtField } from '../hooks/useRedeemAtField'
-import { useRedeemFree, loyaltyNftUnit } from '../hooks/useRedeemFree'
+// U (2026-07-07): RedeemFree eliminado del contrato — el canje de lealtad ahora
+// es un camino de la RESERVA (quemar N NFTs al reservar), no de la tarjeta.
 import { decodeBBS, formatAda, shortenAddr } from './lib'
 import { useOwnerRecord } from '../hooks/useOwnerRecord'
 import type { RentSlotUtxo } from '../hooks/useRentSlots'
@@ -127,15 +128,12 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
   const { confirmRent,   loading: loadingConfirm, error: errConfirm } = useConfirmRent()
   const { openDispute,   loading: loadingDispute, error: errDispute } = useOpenDispute()
   const { redeemAtField, loading: loadingRedeem,  error: errRedeem  } = useRedeemAtField()
-  const { redeemFree,    loading: loadingFree,    error: errFree    } = useRedeemFree()
 
   const [showCancelModal,  setShowCancelModal]  = React.useState(false)
   const [showConfirmModal, setShowConfirmModal] = React.useState(false)
   const [showDisputeModal, setShowDisputeModal] = React.useState(false)
   const [showRedeemModal,  setShowRedeemModal]  = React.useState(false)
-  const [showFreeModal,    setShowFreeModal]    = React.useState(false)
   const [txHash, setTxHash] = React.useState<string | null>(null)
-  const [loyaltyBalance, setLoyaltyBalance] = React.useState<bigint>(0n)
 
   const datum  = slot.datum
   const status = datum.status
@@ -153,17 +151,8 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
     return () => clearInterval(id)
   }, [])
 
-  const isLoading  = loadingCancel || loadingConfirm || loadingDispute || loadingRedeem || loadingFree
-  const anyError   = errCancel || errConfirm || errDispute || errRedeem || errFree
-
-  React.useEffect(() => {
-    if (!lucid || status !== 'Confirmed') return
-    const unit = loyaltyNftUnit(datum.ownerNFTName, datum.customerPkh ?? '')
-    lucid.wallet().getUtxos()
-      .then(utxos => setLoyaltyBalance(utxos.reduce((sum, u) => sum + (u.assets[unit] ?? 0n), 0n)))
-      .catch(() => setLoyaltyBalance(0n))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lucid, status, datum.ownerNFTName, datum.customerPkh])
+  const isLoading  = loadingCancel || loadingConfirm || loadingDispute || loadingRedeem
+  const anyError   = errCancel || errConfirm || errDispute || errRedeem
 
   // ── Derived display values ─────────────────────────────────────────
   const fieldName    = decodeBBS(datum.fieldName)
@@ -181,11 +170,13 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
   const remaining       = datum.rentPrice > slot.lovelace ? datum.rentPrice - slot.lovelace : 0n
   const canCancel       = status === 'Confirmed' || status === 'Pending'
   const cancelDeadlineOk = now < datum.cancelDeadline
-  const canRedeem       = status === 'Confirmed'
+  // R/U: los slots sin Rent NFT (lealtad apagada, o pagados con lealtad) no se
+  // redimen — su flujo feliz termina en Confirmed.
+  const canRedeem       = status === 'Confirmed' && datum.rentNFTName !== null
   const redeemWindowOpensAt = datum.slotStart - 15 * 60_000  // on-chain: after(slot_start - 900_000)
   const redeemEnabled   = now >= redeemWindowOpensAt
-  const canDispute      = status === 'Confirmed' && now > datum.cancelDeadline
-  const canRedeemFree   = status === 'Confirmed' && loyaltyBalance >= BigInt(datum.loyaltyNftsRequired)
+  // U: los slots pagados con lealtad (rent_price 0) no son cancelables ni disputables
+  const canDispute      = status === 'Confirmed' && now > datum.cancelDeadline && datum.rentPrice > 0n
 
   // ── Handlers ──────────────────────────────────────────────────────
   const handleConfirm = async () => {
@@ -219,15 +210,6 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
     try {
       const hash = await redeemAtField(slot)
       setShowRedeemModal(false)
-      setTxHash(hash)
-      setTimeout(() => onActionDone(), 3_000)
-    } catch { /* error shown inline */ }
-  }
-
-  const handleRedeemFree = async () => {
-    try {
-      const hash = await redeemFree(slot)
-      setShowFreeModal(false)
       setTxHash(hash)
       setTimeout(() => onActionDone(), 3_000)
     } catch { /* error shown inline */ }
@@ -345,17 +327,6 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
               </div>
             )}
 
-            {/* Redeem free (loyalty) */}
-            {canRedeemFree && (
-              <button
-                disabled={isLoading}
-                onClick={() => setShowFreeModal(true)}
-                className="px-3 py-1.5 rounded-[8px] text-xs font-semibold border border-[var(--accent)] text-[var(--accent-deep)] bg-[var(--accent-soft)] hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
-              >
-                {loadingFree ? 'Canjeando…' : 'Canjear gratis (lealtad)'}
-              </button>
-            )}
-
             {/* Open dispute */}
             {canDispute && (
               <button
@@ -443,52 +414,6 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 )}
                 Firmar y pagar
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* ── Redeem Free Modal (loyalty) ────────────────────────────── */}
-      {showFreeModal && (
-        <Modal onClose={() => setShowFreeModal(false)}>
-          <div className="p-5">
-            <div className="w-11 h-11 rounded-full bg-[var(--accent-soft)] flex items-center justify-center mx-auto mb-3">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <path d="M20 12v8H4v-8M2 7h20v5H2V7zM12 22V7M12 7H7.5a2.5 2.5 0 010-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 000-5C13 2 12 7 12 7z"
-                  stroke="var(--accent-deep)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </div>
-            <h2 className="text-center font-bold text-[var(--ink)] mb-1">Canjear slot gratis</h2>
-            <p className="text-center text-xs text-[var(--muted)] mb-4">
-              Se queman {datum.loyaltyNftsRequired} NFT(s) de lealtad de tu wallet + el NFT del contrato. Se te reembolsa el rent_price completo.
-            </p>
-
-            <div className="rounded-xl border border-[var(--line)] p-3 mb-4 space-y-0">
-              <SummaryRow label="Cancha"             value={fieldName} />
-              <SummaryRow label="Horario"            value={`${fmtDate(datum.slotStart)} → ${fmtDate(datum.slotEnd)}`} />
-              <SummaryRow label="NFTs de lealtad"    value={`${loyaltyBalance} / ${datum.loyaltyNftsRequired} requeridos`} />
-              <SummaryRow label="Reembolso"          value={formatAda(datum.rentPrice)} />
-              <SummaryRow label="Redeemer"           value="Constr 10 · RedeemFree" />
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowFreeModal(false)}
-                disabled={loadingFree}
-                className="flex-1 py-2.5 rounded-[10px] border border-[var(--line)] text-sm font-semibold text-[var(--ink-2)] hover:border-[var(--line-strong)] disabled:opacity-40"
-              >
-                Volver
-              </button>
-              <button
-                onClick={handleRedeemFree}
-                disabled={loadingFree}
-                className="flex-1 py-2.5 rounded-[10px] bg-[var(--accent)] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-2"
-              >
-                {loadingFree && (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                )}
-                Firmar canje
               </button>
             </div>
           </div>

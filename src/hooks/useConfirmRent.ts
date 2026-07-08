@@ -68,7 +68,8 @@ export function useConfirmRent() {
         datum.companyPkh,
         new Constr(2, []),                  // status = Confirmed
         new Constr(0, [customerPkh]),       // customerPkh preserved
-        new Constr(0, [rentNFTName]),       // rentNFTName = Some(newly minted)
+        // R: con lealtad apagada la confirmación NO mintea Rent NFT
+        datum.loyaltyNftsRequired === 0 ? new Constr(1, []) : new Constr(0, [rentNFTName]),
         new Constr(1, []),                  // disputeDeposit = None
         datum.fieldName,
         datum.fieldAddress,
@@ -88,23 +89,34 @@ export function useConfirmRent() {
 
       const fieldNameText = new TextDecoder().decode(hexToBytes(datum.fieldName))
 
-      const tx = await lucid.newTx()
+      let txBuilder = lucid.newTx()
         .collectFrom(
           [{ txHash: slot.txHash, outputIndex: slot.outputIndex, address: slot.address,
              assets: { lovelace: completedDeposit }, datum: slot.rawDatum }],
           spendRedeemer,
         )
         .attach.SpendingValidator({ type: 'PlutusV3', script: appliedRentSpend })
-        .mintAssets({ [rentNFTUnit]: 1n }, mintRedeemer)
-        .attach.MintingPolicy({ type: 'PlutusV3', script: appliedRentMint })
-        .attachMetadata(721, rentNftMetadata721(RENT_NFT_POLICY, rentNFTName, fieldNameText))
-        .pay.ToContract(
+        .addSignerKey(customerPkh)
+
+      if (datum.loyaltyNftsRequired === 0) {
+        // R: lealtad apagada — confirmar pagando el resto, sin mint
+        txBuilder = txBuilder.pay.ToContract(
           RENT_VALIDATOR_ADDR,
           { kind: 'inline', value: contDatum },
-          { lovelace: datum.rentPrice, [rentNFTUnit]: 1n },
+          { lovelace: datum.rentPrice },
         )
-        .addSignerKey(customerPkh)
-        .complete()
+      } else {
+        txBuilder = txBuilder
+          .mintAssets({ [rentNFTUnit]: 1n }, mintRedeemer)
+          .attach.MintingPolicy({ type: 'PlutusV3', script: appliedRentMint })
+          .attachMetadata(721, rentNftMetadata721(RENT_NFT_POLICY, rentNFTName, fieldNameText))
+          .pay.ToContract(
+            RENT_VALIDATOR_ADDR,
+            { kind: 'inline', value: contDatum },
+            { lovelace: datum.rentPrice, [rentNFTUnit]: 1n },
+          )
+      }
+      const tx = await txBuilder.complete()
 
       const signed = await tx.sign.withWallet().complete()
       return await signed.submit()

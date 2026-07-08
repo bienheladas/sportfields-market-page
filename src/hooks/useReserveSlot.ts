@@ -44,7 +44,19 @@ export function useReserveSlot() {
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
 
-  const reserve = async (headParam: ListHeadUtxo, slotId: number): Promise<string> => {
+  /**
+   * Reserva un slot (alquiler directo M2: Confirmed + pago completo en una tx).
+   * - `payWithLoyalty` (U): quema loyalty_nfts_required NFTs de lealtad en vez
+   *   de pagar — el slot nace con rent_price 0, sin NFT propio, no cancelable
+   *   ni disputable.
+   * - Si la semana tiene loyalty_nfts_required = 0 (R): no se mintea Rent NFT
+   *   y el flujo feliz termina en Confirmed (sin redención).
+   */
+  const reserve = async (
+    headParam: ListHeadUtxo,
+    slotId: number,
+    opts: { payWithLoyalty?: boolean } = {},
+  ): Promise<string> => {
     if (!lucid) throw new Error('Wallet no conectada')
 
     setLoading(true)
@@ -118,6 +130,17 @@ export function useReserveSlot() {
       const rentNFTName = headDatum.ownerNFTName.slice(-8) + customerPkh
       const rentNFTUnit = RENT_NFT_POLICY + rentNFTName
 
+      // Camino de la reserva (ver check_insert_prev):
+      //   R: lealtad apagada → sin mint, precio normal.
+      //   U: pago con lealtad → quema N NFTs, rent_price 0, sin NFT propio.
+      //   M2 (default): mint del Rent NFT + pago completo.
+      const loyaltyOff    = cfg.loyaltyNftsRequired === 0
+      const payWithLoyalty = opts.payWithLoyalty === true
+      if (payWithLoyalty && loyaltyOff)
+        throw new Error('Esta semana no tiene programa de lealtad')
+      const datumRentPrice = payWithLoyalty ? 0n : cfg.rentPrice
+      const mintsNft       = !loyaltyOff && !payWithLoyalty
+
       // New node's next = predecessor's old next
       const slotNextConstr = nodeKeyConstr(predNext)
 
@@ -127,14 +150,14 @@ export function useReserveSlot() {
         BigInt(slotStart),
         BigInt(slotEnd),
         BigInt(cancelDeadline),
-        cfg.rentPrice,
+        datumRentPrice,                             // U: 0 si se paga con lealtad
         BigInt(cfg.siteCommissionBps),
         headDatum.ownerNFTName,
         headDatum.ownerPkh,
         headDatum.companyPkh,
         new Constr(2, []),                          // status = Confirmed
         new Constr(0, [customerPkh]),               // customerPkh = Some(customerPkh)
-        new Constr(0, [rentNFTName]),               // rentNFTName = Some(rentNFTName)
+        mintsNft ? new Constr(0, [rentNFTName]) : new Constr(1, []),  // rentNFTName (R/U: None)
         new Constr(1, []),                          // disputeDeposit = None
         headDatum.fieldName,
         headDatum.fieldAddress,
@@ -165,9 +188,6 @@ export function useReserveSlot() {
       let txBuilder = lucid.newTx()
         .collectFrom([predUtxo], insertRedeemer)
         .attach.SpendingValidator({ type: 'PlutusV3', script: appliedRentSpend })
-        .mintAssets({ [rentNFTUnit]: 1n }, mintRedeemer)
-        .attach.MintingPolicy({ type: 'PlutusV3', script: appliedRentMint })
-        .attachMetadata(721, rentNftMetadata721(RENT_NFT_POLICY, rentNFTName, fieldNameText))
         // Predecessor continues — preserve its FULL value, not just lovelace (a
         // predecessor that's itself a Confirmed/Disputed slot may escrow its own NFT).
         .pay.ToContract(
@@ -175,13 +195,39 @@ export function useReserveSlot() {
           { kind: 'inline', value: newPredDatum },
           predUtxo.assets,
         )
-        .pay.ToContract(
-          RENT_VALIDATOR_ADDR,
-          { kind: 'inline', value: newNodeDatum },
-          { lovelace: cfg.rentPrice, [rentNFTUnit]: 1n },
-        )
         .addSignerKey(customerPkh)
         .validTo(Math.min(reserveDeadline - 1, Date.now() + 10 * 60_000))
+
+      if (mintsNft) {
+        // M2: mint del Rent NFT + pago completo, CIP-25 en la tx que mintea
+        txBuilder = txBuilder
+          .mintAssets({ [rentNFTUnit]: 1n }, mintRedeemer)
+          .attach.MintingPolicy({ type: 'PlutusV3', script: appliedRentMint })
+          .attachMetadata(721, rentNftMetadata721(RENT_NFT_POLICY, rentNFTName, fieldNameText))
+          .pay.ToContract(
+            RENT_VALIDATOR_ADDR,
+            { kind: 'inline', value: newNodeDatum },
+            { lovelace: cfg.rentPrice, [rentNFTUnit]: 1n },
+          )
+      } else if (payWithLoyalty) {
+        // U: quema exacta de N NFTs de lealtad — el slot lleva solo su min-ADA
+        const burnRedeemer = Data.to(new Constr(1, [customerPkh]))  // BurnRentNFT
+        txBuilder = txBuilder
+          .mintAssets({ [rentNFTUnit]: -BigInt(cfg.loyaltyNftsRequired) }, burnRedeemer)
+          .attach.MintingPolicy({ type: 'PlutusV3', script: appliedRentMint })
+          .pay.ToContract(
+            RENT_VALIDATOR_ADDR,
+            { kind: 'inline', value: newNodeDatum },
+            { lovelace: 2_000_000n },
+          )
+      } else {
+        // R: lealtad apagada — pago completo sin mint
+        txBuilder = txBuilder.pay.ToContract(
+          RENT_VALIDATOR_ADDR,
+          { kind: 'inline', value: newNodeDatum },
+          { lovelace: cfg.rentPrice },
+        )
+      }
 
       // If pred is a Node, head must be a reference input (for WeekConfig validation)
       if (!predIsHead) {

@@ -13,6 +13,7 @@ import { useLucid } from '../lib/LucidContext'
 import {
   OWNERS_VALIDATOR_ADDR,
   OWNER_NFT_POLICY,
+  COMPANY_ADDR,
 } from '../lib/config'
 import { getAddressUtxos } from '../lib/blockfrost'
 import { decodeOwnersDatum } from '../lib/decoders'
@@ -69,6 +70,20 @@ export function useDeinitWeek() {
         throw new Error('active_weeks_count ya es 0 — no hay semana activa que cerrar')
       const newRecordFields = [...innerRecord.fields]
       newRecordFields[14] = currentActiveWeeksCount - 1n  // active_weeks_count-- (M3)
+      // P/V: remover las entries de la semana, liberar el remanente de garantía
+      // y liquidar la comisión pendiente (pagar si ≥ 1₳, condonar si no).
+      const weekEndKey  = BigInt(head.datum.config.weekStartPosix) + 604_800_000n
+      const min2n       = (a: bigint, b: bigint) => a <= b ? a : b
+      const lockedWeeks = (innerRecord.fields[16] ?? new Map()) as Map<bigint, bigint>
+      const uncommWeeks = (innerRecord.fields[17] ?? new Map()) as Map<bigint, bigint>
+      const lockedEntry = lockedWeeks.get(weekEndKey) ?? 0n
+      const release     = min2n(lockedEntry, ownerLovelace - 2_000_000n)
+      const carry       = uncommWeeks.get(weekEndKey) ?? 0n
+      const commissionDue = carry * BigInt(head.datum.config.siteCommissionBps) / 10000n
+      const commissionPayable = commissionDue >= 1_000_000n
+      const mapRemove = (m: Map<bigint, bigint>, k: bigint) => new Map([...m].filter(([kk]) => kk !== k))
+      newRecordFields[16] = mapRemove(lockedWeeks, weekEndKey)
+      newRecordFields[17] = mapRemove(uncommWeeks, weekEndKey)
       const newStatsDatum = Data.to(new Constr(1, [new Constr(0, newRecordFields)]))
 
       const deinitRedeemer          = Data.to(new Constr(9, []))  // DeinitWeek (rent_spend)
@@ -86,7 +101,7 @@ export function useDeinitWeek() {
 
       // Paying the NFT back to wallet forces coin selection to include nftWalletUtxo
       // as a tx input, satisfying owner_nft_present() in check_deinit_week.
-      const tx = await lucid.newTx()
+      let txBuilder = lucid.newTx()
         .readFrom([rentSpendRefUtxo, ownersSpendRefUtxo])
         .collectFrom([headUtxo], deinitRedeemer)
         .collectFrom(
@@ -102,11 +117,16 @@ export function useDeinitWeek() {
         .pay.ToContract(
           OWNERS_VALIDATOR_ADDR,
           { kind: 'inline', value: newStatsDatum },
-          { lovelace: ownerLovelace },
+          // P: el remanente de la garantía de la semana vuelve al owner
+          { lovelace: ownerLovelace - release },
         )
         .pay.ToAddress(walletAddr, { lovelace: nftWalletUtxo.assets.lovelace, [fieldNftUnit]: 1n })
         .addSignerKey(ownerPkh)
-        .complete()
+      // V: liquidación de la comisión pendiente de la semana al cierre
+      if (commissionPayable) {
+        txBuilder = txBuilder.pay.ToAddress(COMPANY_ADDR, { lovelace: commissionDue })
+      }
+      const tx = await txBuilder.complete()
 
       const signed = await tx.sign.withWallet().complete()
       return await signed.submit()

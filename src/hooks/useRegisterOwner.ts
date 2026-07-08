@@ -133,7 +133,7 @@ export function useRegisterOwner(): UseRegisterOwner {
         // 20 ADA × 2000 / 10000 = 4 ADA — debe coincidir con init-week.mjs
         const guaranteePerSlot = 4_000_000n
 
-        // ── Datum: DatumOwner = Constr 1 [OwnerRecord (16 campos)] ─
+        // ── Datum: DatumOwner = Constr 1 [OwnerRecord (18 campos)] ─
         const ownerRecord = new Constr(0, [
           tokenNameHex,                    // 0: ownerNFTName = pkh
           ownerPkh,                        // 1: ownerPkh
@@ -151,6 +151,8 @@ export function useRegisterOwner(): UseRegisterOwner {
           guaranteePerSlot,                // 13: guarantee_per_slot (vestigial display value — M3)
           0n,                               // 14: active_weeks_count = 0 (M3 — multiple concurrent weeks allowed)
           fromText(fields.timezone),       // 15: timezone (Mejora L)
+          new Map(),                       // 16: locked_weeks — P (garantía por semana)
+          new Map(),                       // 17: uncommissioned_weeks — V (comisión por semana)
         ])
         const datum = Data.to(new Constr(1, [ownerRecord]))
 

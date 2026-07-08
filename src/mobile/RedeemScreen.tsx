@@ -164,12 +164,19 @@ function RedeemCard({ slot, now, pos, onRedeemed }: {
         </div>
       )}
 
-      {windowState === 'before' && (
+      {/* R/U: slots sin Rent NFT (lealtad apagada o pagados con lealtad) no se
+          redimen — la reserva vale por sí sola y termina en Confirmed */}
+      {!datum.rentNFTName && (
+        <div className="w-full py-2.5 rounded-xl bg-[var(--paper)] border border-[var(--line)] text-[var(--ink-2)] text-[13px] font-semibold text-center">
+          Reserva activa — preséntate en la cancha (sin redención on-chain)
+        </div>
+      )}
+      {datum.rentNFTName && windowState === 'before' && (
         <button disabled className="w-full py-2.5 rounded-xl bg-[var(--paper)] border border-[var(--line)] text-[var(--muted)] text-[14px] font-semibold cursor-not-allowed">
           Abre en {formatCountdown(opensAt - now)}
         </button>
       )}
-      {windowState === 'open' && (
+      {datum.rentNFTName && windowState === 'open' && (
         <button
           type="button"
           disabled={loading}
@@ -179,7 +186,7 @@ function RedeemCard({ slot, now, pos, onRedeemed }: {
           {loading ? 'Firmando y enviando…' : 'Estoy en la cancha — redimir'}
         </button>
       )}
-      {windowState === 'closed' && (
+      {datum.rentNFTName && windowState === 'closed' && (
         <button disabled className="w-full py-2.5 rounded-xl bg-[var(--paper)] border border-[var(--line)] text-[var(--muted)] text-[14px] font-semibold cursor-not-allowed">
           Ventana de redención cerrada
         </button>

@@ -124,17 +124,26 @@ export function useResolveToCustomer() {
       if (companyConfig.kind !== 'Company') throw new Error('Datum inesperado')
       const disputeFee = companyConfig.config.disputeFee
 
-      // M3: gps comes from THIS disputed slot's own RentDatum (frozen at insert time
-      // from its week's WeekConfig), not the stats scalar — matches the on-chain
-      // check, which sums guarantee_per_slot from the rent_spend slot input in tx.inputs.
-      const deduction = disputeFee + datum.guaranteePerSlot
+      // Fix I: deducción EXACTA con clamp — si el pozo no cubre fee+gps se deduce
+      // lo disponible dejando el min-UTxO del stats (2₳).
+      const min2n     = (a: bigint, b: bigint) => a <= b ? a : b
+      const available = statsLovelace - 2_000_000n
+      const deduction = min2n(disputeFee + datum.guaranteePerSlot, available > 0n ? available : 0n)
       const statsContinuing = statsLovelace - deduction
 
-      // rentals_disputed + 1 — preserve all other 16 fields generically
+      // rentals_disputed + 1 — preserve all other 18 fields generically
       const rawOwnerDatum = Data.from(ownerStatsRaw.inline_datum!) as Constr<Data>
       const innerRecord = rawOwnerDatum.fields[0] as Constr<Data>
       const newRecordFields = [...innerRecord.fields]
       newRecordFields[4] = BigInt(rec.rentalsDisputed) + 1n
+      // P: la entry de la semana del slot disputado baja min(gps, entry)
+      const weekEndKey  = BigInt(datum.weekEnd)
+      const lockedWeeks = (innerRecord.fields[16] ?? new Map()) as Map<bigint, bigint>
+      const lockedEntry = lockedWeeks.get(weekEndKey) ?? 0n
+      const entryCut    = min2n(datum.guaranteePerSlot, lockedEntry)
+      newRecordFields[16] = new Map(
+        [...lockedWeeks].map(([k, v]) => k === weekEndKey ? [k, v - entryCut] as [bigint, bigint] : [k, v] as [bigint, bigint])
+      )
       const newStatsDatum = Data.to(new Constr(1, [new Constr(0, newRecordFields)]))
 
       const newPredDatum = rebuildPredDatum(predRawDatum, nodeKeyConstr(datum.next))
