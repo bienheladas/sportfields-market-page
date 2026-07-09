@@ -1,12 +1,13 @@
-// RedeemScreen.tsx — Mejora Q (modo app): lista de reservas Confirmed y redención en la cancha.
+// RedeemScreen.tsx — Mejora Q (modo app): lista de reservas + redención + cancelación.
+// Muestra slots Confirmed (redimibles + cancelables) y Pending (solo cancelables).
 // Ventana [slot_start−15min, week_end] validada client-side (el on-chain la exige igual);
-// advertencia — no bloqueo — si el dispositivo está lejos del campo (la firma del cliente
-// es la protección: redimir lejos solo lo perjudica a él).
+// advertencia — no bloqueo — si el dispositivo está lejos del campo.
 
 import * as React from 'react'
 import { useLucid } from '../lib/LucidContext'
 import { useMyReservations } from '../hooks/useMyReservations'
 import { useRedeemAtField } from '../hooks/useRedeemAtField'
+import { useCancelRent } from '../hooks/useCancelRent'
 import type { RentSlotUtxo } from '../hooks/useRentSlots'
 import { decodeBBS, formatAda, formatPosixDateTime, parseLatLong } from '../components/lib'
 
@@ -21,15 +22,11 @@ export function RedeemScreen() {
   const [now, setNow] = React.useState(() => Date.now())
   const [pos, setPos] = React.useState<GeoPos | null>(null)
 
-  // Tick para la cuenta regresiva de la ventana de redención
   React.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1_000)
     return () => clearInterval(id)
   }, [])
 
-  // Posición del dispositivo (best effort — si el usuario la niega, simplemente no se advierte).
-  // En la app nativa se usa el plugin de Capacitor (maneja el prompt de permisos de Android/iOS,
-  // cosa que navigator.geolocation no hace dentro del WebView); en browser, la API estándar.
   React.useEffect(() => {
     let cancelled = false
     const cap = (window as any).Capacitor
@@ -37,18 +34,19 @@ export function RedeemScreen() {
       import('@capacitor/geolocation')
         .then(({ Geolocation }) => Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10_000 }))
         .then(p => { if (!cancelled) setPos({ lat: p.coords.latitude, long: p.coords.longitude }) })
-        .catch(() => { /* sin permiso o sin señal — la advertencia de distancia se omite */ })
+        .catch(() => {})
     } else if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         p => { if (!cancelled) setPos({ lat: p.coords.latitude, long: p.coords.longitude }) },
-        () => { /* sin permiso o sin señal — la advertencia de distancia se omite */ },
+        () => {},
         { enableHighAccuracy: true, timeout: 10_000 },
       )
     }
     return () => { cancelled = true }
   }, [])
 
-  const confirmed = slots.filter(s => s.datum.status === 'Confirmed')
+  // Show Confirmed and Pending slots (Pending can be cancelled, Confirmed can also be redeemed)
+  const active = slots.filter(s => s.datum.status === 'Confirmed' || s.datum.status === 'Pending')
 
   return (
     <div className="flex flex-col gap-3 px-5 py-6 max-w-[440px] w-full mx-auto">
@@ -71,43 +69,46 @@ export function RedeemScreen() {
         </div>
       )}
 
-      {!loading && !error && confirmed.length === 0 && (
+      {!loading && !error && active.length === 0 && (
         <div className="py-10 text-center">
-          <p className="m-0 text-[14px] text-[var(--muted)]">No tienes reservas confirmadas.</p>
-          <p className="m-0 mt-1 text-[13px] text-[var(--muted)]">Reserva desde la web y aparecerán aquí para redimir.</p>
+          <p className="m-0 text-[14px] text-[var(--muted)]">No tienes reservas activas.</p>
+          <p className="m-0 mt-1 text-[13px] text-[var(--muted)]">Reserva desde la web y aparecerán aquí.</p>
         </div>
       )}
 
-      {confirmed.map(slot => (
-        <RedeemCard
+      {active.map(slot => (
+        <ReservationCard
           key={`${slot.txHash}#${slot.outputIndex}`}
           slot={slot}
           now={now}
           pos={pos}
-          onRedeemed={reload}
+          onDone={reload}
         />
       ))}
     </div>
   )
 }
 
-function RedeemCard({ slot, now, pos, onRedeemed }: {
+function ReservationCard({ slot, now, pos, onDone }: {
   slot: RentSlotUtxo
   now: number
   pos: GeoPos | null
-  onRedeemed: () => void
+  onDone: () => void
 }) {
-  const { redeemAtField, loading } = useRedeemAtField()
+  const { redeemAtField, loading: redeeming } = useRedeemAtField()
+  const { cancel, loading: cancelling } = useCancelRent()
+
   const [txHash, setTxHash] = React.useState<string | null>(null)
+  const [txKind, setTxKind] = React.useState<'redeemed' | 'cancelled' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+  const [confirmCancel, setConfirmCancel] = React.useState(false)
 
   const datum = slot.datum
   const opensAt = datum.slotStart - REDEEM_OPENS_BEFORE_MS
-  const windowState: 'before' | 'open' | 'closed' =
+  const redeemWindowState: 'before' | 'open' | 'closed' =
     now < opensAt ? 'before' : now < datum.weekEnd ? 'open' : 'closed'
 
-  // Al redimir, el cliente está (o debería estar) en la cancha — la zona horaria del
-  // dispositivo coincide con la del campo, así que se usa directamente.
+  const canCancel = now < datum.cancelDeadline
   const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone
 
   const fieldPos = parseLatLong(datum.lat, datum.long)
@@ -116,15 +117,29 @@ function RedeemCard({ slot, now, pos, onRedeemed }: {
 
   const handleRedeem = async () => {
     setError(null)
+    setConfirmCancel(false)
     try {
       const hash = await redeemAtField(slot)
       setTxHash(hash)
+      setTxKind('redeemed')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
   }
 
-  if (txHash) {
+  const handleCancel = async () => {
+    setError(null)
+    try {
+      const hash = await cancel(slot)
+      setTxHash(hash)
+      setTxKind('cancelled')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setConfirmCancel(false)
+    }
+  }
+
+  if (txHash && txKind === 'redeemed') {
     return (
       <div className="p-4 rounded-2xl bg-[#eaf4ee] border border-[#bcd9c6]">
         <p className="m-0 text-[14px] font-semibold text-[#244d33]">✓ Reserva redimida</p>
@@ -132,12 +147,25 @@ function RedeemCard({ slot, now, pos, onRedeemed }: {
           El NFT de lealtad llegó a tu billetera. La confirmación en cadena tarda ~30 s.
         </p>
         <code className="block mt-2 px-2.5 py-1.5 rounded-lg bg-white/60 text-[11px] break-all text-[#244d33]">{txHash}</code>
-        <button
-          type="button"
-          onClick={onRedeemed}
-          className="mt-3 w-full py-2 rounded-xl bg-[var(--paper)] border border-[#bcd9c6] text-[#244d33] text-[13px] font-semibold"
-        >
+        <button type="button" onClick={onDone}
+          className="mt-3 w-full py-2 rounded-xl bg-[var(--paper)] border border-[#bcd9c6] text-[#244d33] text-[13px] font-semibold">
           Listo
+        </button>
+      </div>
+    )
+  }
+
+  if (txHash && txKind === 'cancelled') {
+    return (
+      <div className="p-4 rounded-2xl bg-[var(--paper-2)] border border-[var(--line)]">
+        <p className="m-0 text-[14px] font-semibold text-[var(--ink)]">Reserva cancelada</p>
+        <p className="m-0 mt-1 text-[12px] leading-[1.5] text-[var(--ink-2)]">
+          El reembolso de {formatAda(datum.rentPrice)} llegará a tu billetera en ~30 s.
+        </p>
+        <code className="block mt-2 px-2.5 py-1.5 rounded-lg bg-[var(--paper)] border border-[var(--line)] text-[11px] break-all text-[var(--muted)]">{txHash}</code>
+        <button type="button" onClick={onDone}
+          className="mt-3 w-full py-2 rounded-xl bg-[var(--paper)] border border-[var(--line)] text-[var(--ink)] text-[13px] font-semibold">
+          Cerrar
         </button>
       </div>
     )
@@ -145,51 +173,108 @@ function RedeemCard({ slot, now, pos, onRedeemed }: {
 
   return (
     <div className="p-4 rounded-2xl bg-[var(--paper-2)] border border-[var(--line)] flex flex-col gap-2.5">
+      {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="m-0 text-[15px] font-semibold text-[var(--ink)] truncate">{decodeBBS(datum.fieldName)}</h3>
           <p className="m-0 mt-0.5 text-[12px] text-[var(--muted)] truncate">{decodeBBS(datum.fieldAddress)}</p>
         </div>
-        <span className="shrink-0 text-[13px] font-semibold text-[var(--ink)]">{formatAda(datum.rentPrice)}</span>
+        <div className="shrink-0 flex flex-col items-end gap-1">
+          <span className="text-[13px] font-semibold text-[var(--ink)]">{formatAda(datum.rentPrice)}</span>
+          {datum.status === 'Pending' && (
+            <span className="px-2 py-0.5 rounded-full bg-[var(--amber-bg)] border border-[#ebd187] text-[11px] font-semibold text-[var(--amber-ink)]">
+              Pendiente
+            </span>
+          )}
+        </div>
       </div>
 
       <p className="m-0 text-[13px] text-[var(--ink-2)]">
         {formatPosixDateTime(datum.slotStart, 'es', deviceTz)} · hora local
       </p>
 
-      {isFar && windowState !== 'closed' && (
+      {/* Distance warning (only for Confirmed in redeem window) */}
+      {isFar && datum.status === 'Confirmed' && redeemWindowState !== 'closed' && (
         <div className="px-3 py-2 rounded-xl bg-[var(--amber-bg)] border border-[#ebd187] text-[12px] leading-[1.45] text-[var(--amber-ink)]">
-          ⚠ Estás a ~{formatDistance(distanceM!)} de la cancha. Redimir confirma que el servicio se
-          cumplió y ya no podrás abrir una disputa.
+          ⚠ Estás a ~{formatDistance(distanceM!)} de la cancha. Redimir confirma que el servicio
+          se cumplió y ya no podrás abrir una disputa.
         </div>
       )}
 
-      {/* R/U: slots sin Rent NFT (lealtad apagada o pagados con lealtad) no se
-          redimen — la reserva vale por sí sola y termina en Confirmed */}
-      {!datum.rentNFTName && (
-        <div className="w-full py-2.5 rounded-xl bg-[var(--paper)] border border-[var(--line)] text-[var(--ink-2)] text-[13px] font-semibold text-center">
-          Reserva activa — preséntate en la cancha (sin redención on-chain)
-        </div>
+      {/* Cancel deadline warning */}
+      {canCancel && (
+        <p className="m-0 text-[12px] text-[var(--muted)]">
+          Cancelación disponible hasta: {formatPosixDateTime(datum.cancelDeadline, 'es', deviceTz)}
+        </p>
       )}
-      {datum.rentNFTName && windowState === 'before' && (
+
+      {/* Redeem button — only for Confirmed slots with NFT */}
+      {datum.status === 'Confirmed' && datum.rentNFTName && redeemWindowState === 'before' && !confirmCancel && (
         <button disabled className="w-full py-2.5 rounded-xl bg-[var(--paper)] border border-[var(--line)] text-[var(--muted)] text-[14px] font-semibold cursor-not-allowed">
           Abre en {formatCountdown(opensAt - now)}
         </button>
       )}
-      {datum.rentNFTName && windowState === 'open' && (
+      {datum.status === 'Confirmed' && datum.rentNFTName && redeemWindowState === 'open' && !confirmCancel && (
         <button
           type="button"
-          disabled={loading}
+          disabled={redeeming || cancelling}
           onClick={handleRedeem}
           className="w-full py-2.5 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-deep)] text-white text-[14px] font-semibold transition-colors disabled:opacity-50"
         >
-          {loading ? 'Firmando y enviando…' : 'Estoy en la cancha — redimir'}
+          {redeeming ? 'Firmando y enviando…' : 'Estoy en la cancha — redimir'}
         </button>
       )}
-      {datum.rentNFTName && windowState === 'closed' && (
+      {datum.status === 'Confirmed' && datum.rentNFTName && redeemWindowState === 'closed' && !confirmCancel && (
         <button disabled className="w-full py-2.5 rounded-xl bg-[var(--paper)] border border-[var(--line)] text-[var(--muted)] text-[14px] font-semibold cursor-not-allowed">
           Ventana de redención cerrada
         </button>
+      )}
+      {/* Confirmed slot without NFT (lealtad apagada o pagado con lealtad) */}
+      {datum.status === 'Confirmed' && !datum.rentNFTName && !confirmCancel && (
+        <div className="w-full py-2.5 rounded-xl bg-[var(--paper)] border border-[var(--line)] text-[var(--ink-2)] text-[13px] font-semibold text-center">
+          Reserva activa — preséntate en la cancha (sin redención on-chain)
+        </div>
+      )}
+
+      {/* Cancel section */}
+      {!confirmCancel && canCancel && !redeeming && (
+        <button
+          type="button"
+          disabled={cancelling}
+          onClick={() => { setError(null); setConfirmCancel(true) }}
+          className="w-full py-2 rounded-xl bg-[var(--paper)] border border-[var(--line)] text-[var(--rose-ink)] text-[13px] font-semibold hover:bg-[var(--rose-bg)] transition-colors disabled:opacity-50"
+        >
+          Cancelar reserva
+        </button>
+      )}
+
+      {/* Inline cancel confirmation */}
+      {confirmCancel && (
+        <div className="rounded-xl bg-[var(--rose-bg)] border border-[#ecb5ac] p-3.5 flex flex-col gap-2.5">
+          <p className="m-0 text-[13px] font-semibold text-[var(--rose-ink)]">¿Cancelar esta reserva?</p>
+          <p className="m-0 text-[12px] leading-[1.45] text-[var(--rose-ink)]">
+            Recibirás {formatAda(datum.rentPrice)} de reembolso en tu billetera.
+            Esta acción no se puede deshacer.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={cancelling}
+              onClick={handleCancel}
+              className="flex-1 py-2 rounded-xl bg-[var(--rose-ink)] text-white text-[13px] font-semibold disabled:opacity-50"
+            >
+              {cancelling ? 'Enviando…' : 'Sí, cancelar'}
+            </button>
+            <button
+              type="button"
+              disabled={cancelling}
+              onClick={() => setConfirmCancel(false)}
+              className="flex-1 py-2 rounded-xl bg-[var(--paper)] border border-[#ecb5ac] text-[var(--rose-ink)] text-[13px] font-semibold disabled:opacity-50"
+            >
+              No, volver
+            </button>
+          </div>
+        </div>
       )}
 
       {error && (
