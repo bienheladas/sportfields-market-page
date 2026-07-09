@@ -64,7 +64,7 @@ export function useResolveToOwner() {
       if (ownerRecord.kind !== 'Owner') throw new Error('Datum inesperado')
       const statsLovelace = BigInt(ownerStatsRaw.amount.find(a => a.unit === 'lovelace')?.quantity ?? '0')
 
-      // rentals_completed + 1 — preserve all other 16 fields generically
+      // rentals_completed + 1 — preserve all other 18 fields generically
       const rawOwnerDatum = Data.from(ownerStatsRaw.inline_datum!) as Constr<Data>
       const innerRecord = rawOwnerDatum.fields[0] as Constr<Data>
       const newRecordFields = [...innerRecord.fields]
