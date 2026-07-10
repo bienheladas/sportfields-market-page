@@ -7,6 +7,7 @@ import { useForceClosePending } from '../hooks/useForceClosePending'
 import { useDeinitWeek } from '../hooks/useDeinitWeek'
 import { useUpdateOwnerInfo } from '../hooks/useUpdateOwnerInfo'
 import { useDeregisterOwner } from '../hooks/useDeregisterOwner'
+import { useStrandedOwnerFields, useRecoverOldField, type StrandedField } from '../hooks/useRecoverOldField'
 import { OwnerRecordCard } from '../components/OwnerRecordCard'
 import { decodeBBS, formatAda } from '../components/lib'
 import { OwnerInfoForm } from '../components/OwnerInfoForm'
@@ -16,6 +17,147 @@ import type { RentSlotUtxo, ListHeadUtxo } from '../hooks/useRentSlots'
 import type { MutableOwnerFields } from '../components/OwnerInfoForm'
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
+function RecoveryCard({ field }: { field: StrandedField }) {
+  const { deinitOldWeek, deregisterOldField, loading: recovering, error: recoveryError } = useRecoverOldField()
+  const [step, setStep] = React.useState<'deinit' | 'deregister' | 'done'>(() =>
+    field.activeWeeksCount === 0n ? 'deregister' : 'deinit'
+  )
+  const [txHash, setTxHash] = React.useState<string | null>(null)
+  const [localError, setLocalError] = React.useState<string | null>(null)
+
+  const now = Date.now()
+  const weekEndMs = field.weekEnd ? Number(field.weekEnd) : 0
+  const canDeinit = !field.weekEnd || now > weekEndMs
+  const unlockDate = weekEndMs ? new Date(weekEndMs).toLocaleDateString('es-PE', {
+    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima',
+  }) : null
+
+  const totalLocked = [...field.lockedWeeks.values()].reduce((a, b) => a + b, 0n)
+
+  const handleDeinit = async () => {
+    setLocalError(null)
+    try {
+      const hash = await deinitOldWeek(field)
+      setTxHash(hash)
+      setStep('deregister')
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const handleDeregister = async () => {
+    setLocalError(null)
+    try {
+      const hash = await deregisterOldField({ ...field, activeWeeksCount: 0n, weekEnd: null })
+      setTxHash(hash)
+      setStep('done')
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  return (
+    <div className="rounded-[12px] border border-amber-300 bg-amber-50 p-4 flex flex-col gap-3">
+      <div className="flex items-start gap-2">
+        <span className="text-amber-600 text-[16px] leading-none mt-0.5">⚠</span>
+        <div className="flex-1 min-w-0">
+          <p className="m-0 text-[14px] font-semibold text-amber-900">
+            Cancha en dirección antigua: {decodeBBS(field.fieldName)}
+          </p>
+          <p className="m-0 mt-0.5 text-[12px] text-amber-700 leading-snug">
+            Fondos bloqueados: <strong>{formatAda(field.lovelace)}</strong>
+            {totalLocked > 0n && <span> (garantía: {formatAda(totalLocked)})</span>}
+            . Recuperalos en 2 pasos.
+          </p>
+        </div>
+      </div>
+
+      {step === 'done' ? (
+        <div className="px-3 py-2 rounded-[8px] bg-green-50 border border-green-300 text-[13px] text-green-800">
+          ✓ Recuperación completada. Ya podés re-registrar la cancha.
+          {txHash && <code className="block mt-1 text-[11px] break-all">{txHash}</code>}
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <StepRow
+              n={1}
+              label="Cerrar semana (libera garantía)"
+              active={step === 'deinit'}
+              done={step === 'deregister'}
+            >
+              {step === 'deinit' && (
+                canDeinit ? (
+                  <button
+                    type="button"
+                    disabled={recovering}
+                    onClick={handleDeinit}
+                    className="px-3 py-1.5 rounded-[8px] text-[12px] font-semibold bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-40"
+                  >
+                    {recovering ? 'Firmando…' : 'Cerrar semana'}
+                  </button>
+                ) : (
+                  <p className="text-[11px] text-amber-700 italic">
+                    Disponible desde: {unlockDate}
+                  </p>
+                )
+              )}
+              {step === 'deregister' && txHash && (
+                <code className="text-[11px] text-amber-700 break-all">Tx: {txHash.slice(0, 16)}…</code>
+              )}
+            </StepRow>
+
+            <StepRow
+              n={2}
+              label="Dar de baja la cancha (quema el NFT)"
+              active={step === 'deregister'}
+              done={false}
+            >
+              {step === 'deregister' && (
+                <button
+                  type="button"
+                  disabled={recovering}
+                  onClick={handleDeregister}
+                  className="px-3 py-1.5 rounded-[8px] text-[12px] font-semibold bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-40"
+                >
+                  {recovering ? 'Firmando…' : 'Dar de baja'}
+                </button>
+              )}
+            </StepRow>
+          </div>
+
+          <p className="m-0 text-[11px] text-amber-700">
+            Después del paso 2, re-registrá la cancha en "Registrar cancha" para volver a usarla.
+          </p>
+        </>
+      )}
+
+      {(localError || recoveryError) && (
+        <div className="px-3 py-2 rounded-[8px] bg-red-50 border border-red-300 text-[12px] text-red-800 break-words">
+          {localError || recoveryError}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StepRow({ n, label, active, done, children }: {
+  n: number; label: string; active: boolean; done: boolean; children?: React.ReactNode
+}) {
+  return (
+    <div className={`flex items-start gap-2.5 px-3 py-2 rounded-[8px] ${active ? 'bg-white border border-amber-300' : 'opacity-60'}`}>
+      <span className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold mt-0.5
+        ${done ? 'bg-green-500 text-white' : active ? 'bg-amber-600 text-white' : 'bg-amber-200 text-amber-700'}`}>
+        {done ? '✓' : n}
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="m-0 text-[12px] font-medium text-amber-900">{label}</p>
+        {children}
+      </div>
+    </div>
+  )
+}
 
 interface WeekView {
   head: ListHeadUtxo
@@ -138,6 +280,8 @@ function WeekCard({
 export default function OwnerPanel() {
   const { connected, pkh: ownerPkh } = useLucid()
 
+  const { strandedFields, loadingStranded } = useStrandedOwnerFields(ownerPkh || null)
+
   const { fields: ownerFields, loading: loadingFields, reload: reloadFields } = useOwnerFields(ownerPkh || null)
   const [selectedIdx, setSelectedIdx] = React.useState(0)
   const selectedField = ownerFields[selectedIdx] ?? null
@@ -186,11 +330,23 @@ export default function OwnerPanel() {
   )
 
   if (!selectedField) return (
-    <div className="max-w-xl mx-auto px-4 py-16 text-center">
-      <p className="text-[var(--muted)] mb-4">No se encontró un Owner NFT para esta wallet.</p>
-      <a href="/register" className="inline-block px-4 py-2 rounded-[10px] bg-[var(--accent)] text-white font-semibold text-sm">
-        Registrarse como propietario
-      </a>
+    <div className="max-w-xl mx-auto px-4 py-8 flex flex-col gap-6">
+      {strandedFields.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <h2 className="text-[16px] font-semibold text-amber-800">Canchas en dirección anterior</h2>
+          {strandedFields.map(f => (
+            <RecoveryCard key={f.ownerNFTName} field={f} />
+          ))}
+        </div>
+      )}
+      {!loadingStranded && strandedFields.length === 0 && (
+        <div className="py-12 text-center">
+          <p className="text-[var(--muted)] mb-4">No se encontró un Owner NFT para esta wallet.</p>
+          <a href="/register" className="inline-block px-4 py-2 rounded-[10px] bg-[var(--accent)] text-white font-semibold text-sm">
+            Registrarse como propietario
+          </a>
+        </div>
+      )}
     </div>
   )
 
@@ -271,6 +427,14 @@ export default function OwnerPanel() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-6">
+      {strandedFields.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <h2 className="text-[16px] font-semibold text-amber-800">Canchas en dirección anterior (necesitan recuperación)</h2>
+          {strandedFields.map(f => (
+            <RecoveryCard key={f.ownerNFTName} field={f} />
+          ))}
+        </div>
+      )}
       <div className="flex gap-2 flex-wrap items-center">
         {ownerFields.map((f, i) => (
           <button
