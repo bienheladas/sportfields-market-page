@@ -353,14 +353,7 @@ export default function OwnerPanel() {
   const record = selectedField.record
   const completedSlots = slots.filter(s => s.datum.status === 'Completed' && s.datum.fieldName === record.fieldName)
 
-  // A head belongs to this field if:
-  // (a) its ownerNFTName matches exactly — covers heads created after a rename, OR
-  // (b) ownerPkh matches AND fieldName matches — covers heads created with a
-  //     different registration's ownerNFTName but the same field name.
-  const fieldHeads = heads.filter(h =>
-    h.datum.ownerNFTName === selectedField.ownerNFTName ||
-    (h.datum.ownerPkh === record.ownerPkh && h.datum.fieldName === record.fieldName)
-  )
+  const fieldHeads = heads.filter(h => h.datum.ownerNFTName === selectedField.ownerNFTName)
 
   const weeks: WeekView[] = fieldHeads
     .map(h => {
