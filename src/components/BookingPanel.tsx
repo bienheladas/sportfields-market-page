@@ -16,10 +16,14 @@ export interface BookingPanelProps {
   slot: RentSlotUtxoLike | null;
   onClose: () => void;
 
-  /** Tx 4 — Reserve (solo aplica a slots Available). */
-  onReserve: (slot: RentSlotUtxoLike) => void | Promise<void>;
+  /** Tx 4 — Reserve (solo aplica a slots Available).
+   *  `depositOnly` (Mejora N): reserva Pending con depósito del 50% — se
+   *  confirma después desde "Mis reservas" pagando el resto. */
+  onReserve: (slot: RentSlotUtxoLike, opts?: { depositOnly?: boolean }) => void | Promise<void>;
   /** Tx 6 — CancelRent (aplica si viewer == customer y status Pending|Confirmed). */
   onCancel?: (slot: RentSlotUtxoLike) => void | Promise<void>;
+  /** Tx 5 — ConfirmRent (aplica si viewer == customer, status Pending, antes del deadline). */
+  onConfirm?: (slot: RentSlotUtxoLike) => void | Promise<void>;
   /** Abre el WalletModal cuando no hay wallet conectada. */
   onConnectWallet: () => void;
 
@@ -40,6 +44,7 @@ export function BookingPanel({
   onClose,
   onReserve,
   onCancel,
+  onConfirm,
   onConnectWallet,
   connected,
   viewerPkh = null,
@@ -79,8 +84,14 @@ export function BookingPanel({
     (d.status === 'Confirmed' || d.status === 'Pending') &&
     isCustomer &&
     Date.now() < d.cancelDeadline;
+  const canConfirm =
+    d.status === 'Pending' &&
+    isCustomer &&
+    Date.now() < d.cancelDeadline;
+  const remainingLovelace =
+    d.rentPrice > slot.lovelace ? d.rentPrice - slot.lovelace : 0n;
 
-  const handleReserve = async () => {
+  const handleReserve = async (opts?: { depositOnly?: boolean }) => {
     if (!connected) {
       onConnectWallet();
       return;
@@ -88,7 +99,7 @@ export function BookingPanel({
     setError(null);
     setSubmitting(true);
     try {
-      await onReserve(slot);
+      await onReserve(slot, opts);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -102,6 +113,19 @@ export function BookingPanel({
     setSubmitting(true);
     try {
       await onCancel(slot);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!onConfirm) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      await onConfirm(slot);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -162,7 +186,20 @@ export function BookingPanel({
             {isAvailable ? (
               <AvailableBody d={d} timeZone={timeZone} />
             ) : (
-              <NonAvailableBody d={d} isCustomer={isCustomer} canCancel={canCancel} timeZone={timeZone} />
+              <>
+                {canConfirm && remainingLovelace > 0n && (
+                  <div className="pt-3.5">
+                    <NoteBox tone="amber">
+                      Reserva apartada con depósito del 50%. Te falta pagar{' '}
+                      <strong>{(Number(remainingLovelace) / 1_000_000).toFixed(2)} ₳</strong> para
+                      confirmarla — hazlo antes del{' '}
+                      <strong>{formatPosixDateTime(d.cancelDeadline, 'es', timeZone)}</strong> o el
+                      propietario podrá cerrarla y quedarse con el depósito.
+                    </NoteBox>
+                  </div>
+                )}
+                <NonAvailableBody d={d} isCustomer={isCustomer} canCancel={canCancel} timeZone={timeZone} />
+              </>
             )}
           </div>
 
@@ -183,14 +220,34 @@ export function BookingPanel({
           {/* Footer */}
           <footer className="px-6 py-4 pb-5 border-t border-[var(--line)] bg-[var(--paper)] flex flex-col gap-2">
             {isAvailable ? (
-              <ReserveButton
-                connected={connected}
-                submitting={submitting}
-                onClick={handleReserve}
-              />
-            ) : canCancel && onCancel ? (
-              <CancelButton submitting={submitting} onClick={handleCancel} />
-            ) : null}
+              <>
+                <ReserveButton
+                  connected={connected}
+                  submitting={submitting}
+                  onClick={() => handleReserve()}
+                />
+                {connected && (
+                  <DepositReserveButton
+                    submitting={submitting}
+                    depositAda={Number(d.rentPrice) / 2_000_000}
+                    onClick={() => handleReserve({ depositOnly: true })}
+                  />
+                )}
+              </>
+            ) : (
+              <>
+                {canConfirm && onConfirm && (
+                  <ConfirmButton
+                    submitting={submitting}
+                    remainingAda={Number(remainingLovelace) / 1_000_000}
+                    onClick={handleConfirm}
+                  />
+                )}
+                {canCancel && onCancel && (
+                  <CancelButton submitting={submitting} onClick={handleCancel} />
+                )}
+              </>
+            )}
 
             <button
               type="button"
@@ -233,6 +290,15 @@ function AvailableBody({ d, timeZone }: { d: RentSlotUtxoLike['datum']; timeZone
         <NoteBox>
           Puedes cancelar hasta el <strong>{cancelLabel}</strong>. La cancelación devuelve{' '}
           <strong>{refundOnCancel.toFixed(2)} ₳</strong> (descuento de {cancelPenalty} ₳ por penalidad on-chain).
+        </NoteBox>
+      </Section>
+
+      <Section title="Separar con el 50%">
+        <NoteBox tone="amber">
+          También puedes apartar el turno pagando solo <strong>{(rentAda / 2).toFixed(2)} ₳</strong> ahora.
+          Después debes confirmar desde <strong>Mis reservas</strong> pagando el resto{' '}
+          <strong>antes del {cancelLabel}</strong> — si no confirmas, el propietario puede cerrar
+          la reserva y quedarse con el depósito.
         </NoteBox>
       </Section>
 
@@ -355,6 +421,58 @@ function ReserveButton({
           </svg>
         </>
       )}
+    </button>
+  );
+}
+
+function ConfirmButton({
+  submitting,
+  remainingAda,
+  onClick,
+}: {
+  submitting: boolean;
+  remainingAda: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={submitting}
+      className={[
+        'w-full p-[13px] rounded-[10px] border-0 bg-[var(--accent)] text-white font-semibold text-[15px]',
+        'cursor-pointer flex items-center justify-center gap-2',
+        'hover:bg-[var(--accent-deep)] transition-colors',
+        submitting ? 'opacity-60 cursor-wait' : '',
+      ].join(' ')}
+    >
+      {submitting ? 'Procesando…' : `Confirmar reserva (pagar ${remainingAda.toFixed(2)} ₳)`}
+    </button>
+  );
+}
+
+function DepositReserveButton({
+  submitting,
+  depositAda,
+  onClick,
+}: {
+  submitting: boolean;
+  depositAda: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={submitting}
+      className={[
+        'w-full p-[12px] rounded-[10px] border border-[var(--accent)] bg-[var(--paper)] text-[var(--accent-deep,#d44a2f)] font-semibold text-[14px]',
+        'cursor-pointer flex items-center justify-center gap-2',
+        'hover:bg-[var(--accent-soft,#ffe1d8)] transition-colors',
+        submitting ? 'opacity-60 cursor-wait' : '',
+      ].join(' ')}
+    >
+      {submitting ? 'Procesando…' : `Separar con 50% (${depositAda.toFixed(2)} ₳)`}
     </button>
   );
 }

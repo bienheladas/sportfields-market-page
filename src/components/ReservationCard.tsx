@@ -166,7 +166,8 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
   const isActiveNow = now >= datum.slotStart && now <= datum.slotEnd
 
   // ── Action visibility logic ────────────────────────────────────────
-  const canConfirm      = status === 'Pending'
+  // ConfirmRent exige before(cancel_deadline) on-chain — igual que CancelRent.
+  const canConfirm      = status === 'Pending' && now < datum.cancelDeadline
   const remaining       = datum.rentPrice > slot.lovelace ? datum.rentPrice - slot.lovelace : 0n
   const canCancel       = status === 'Confirmed' || status === 'Pending'
   const cancelDeadlineOk = now < datum.cancelDeadline
@@ -289,6 +290,11 @@ export function ReservationCard({ slot, onActionDone }: ReservationCardProps) {
               >
                 {loadingConfirm ? 'Confirmando…' : `Confirmar y pagar ${formatAda(remaining)}`}
               </button>
+            )}
+            {status === 'Pending' && !canConfirm && (
+              <span className="px-3 py-1.5 rounded-[8px] text-xs font-medium bg-[var(--paper-2)] text-[var(--muted)] border border-[var(--line)]">
+                Plazo de confirmación vencido — el propietario puede cerrar esta reserva
+              </span>
             )}
 
             {/* Cancel */}

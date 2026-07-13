@@ -89,6 +89,11 @@ export function useConfirmRent() {
 
       const fieldNameText = new TextDecoder().decode(hexToBytes(datum.fieldName))
 
+      // check_confirm_rent exige before(cancel_deadline) — intervalo ABIERTO,
+      // así que validTo debe ser estrictamente menor. Cap a +4h por PastHorizon.
+      if (Date.now() >= datum.cancelDeadline - 1_000)
+        throw new Error('El plazo para confirmar esta reserva ya venció')
+
       let txBuilder = lucid.newTx()
         .collectFrom(
           [{ txHash: slot.txHash, outputIndex: slot.outputIndex, address: slot.address,
@@ -97,6 +102,7 @@ export function useConfirmRent() {
         )
         .attach.SpendingValidator({ type: 'PlutusV3', script: appliedRentSpend })
         .addSignerKey(customerPkh)
+        .validTo(Math.min(datum.cancelDeadline - 1_000, Date.now() + 4 * 3_600_000))
 
       if (datum.loyaltyNftsRequired === 0) {
         // R: lealtad apagada — confirmar pagando el resto, sin mint

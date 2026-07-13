@@ -49,13 +49,17 @@ export function useReserveSlot() {
    * - `payWithLoyalty` (U): quema loyalty_nfts_required NFTs de lealtad en vez
    *   de pagar — el slot nace con rent_price 0, sin NFT propio, no cancelable
    *   ni disputable.
+   * - `depositOnly` (C/N): reserva con depósito del 50% — el slot nace Pending,
+   *   sin Rent NFT (se acuña al confirmar). El cliente confirma después con
+   *   useConfirmRent (pestaña "Pendientes") pagando el resto ANTES del
+   *   cancel_deadline; si no confirma, el owner puede cerrarlo (ForceClosePending).
    * - Si la semana tiene loyalty_nfts_required = 0 (R): no se mintea Rent NFT
    *   y el flujo feliz termina en Confirmed (sin redención).
    */
   const reserve = async (
     headParam: ListHeadUtxo,
     slotId: number,
-    opts: { payWithLoyalty?: boolean } = {},
+    opts: { payWithLoyalty?: boolean; depositOnly?: boolean } = {},
   ): Promise<string> => {
     if (!lucid) throw new Error('Wallet no conectada')
 
@@ -64,7 +68,9 @@ export function useReserveSlot() {
 
     try {
       // Fetch fresh UTxOs
+      console.log('[reserve] 1/5 consultando UTxOs del contrato…')
       const allUtxos = await lucid.utxosAt(RENT_VALIDATOR_ADDR)
+      console.log('[reserve] 1/5 ok —', allUtxos.length, 'UTxOs')
 
       // Locate head UTxO on-chain
       const headUtxo = allUtxos.find(u =>
@@ -131,15 +137,20 @@ export function useReserveSlot() {
       const rentNFTUnit = RENT_NFT_POLICY + rentNFTName
 
       // Camino de la reserva (ver check_insert_prev):
+      //   C/N: depósito 50% → status Pending, sin mint (NFT al confirmar).
       //   R: lealtad apagada → sin mint, precio normal.
       //   U: pago con lealtad → quema N NFTs, rent_price 0, sin NFT propio.
       //   M2 (default): mint del Rent NFT + pago completo.
       const loyaltyOff    = cfg.loyaltyNftsRequired === 0
       const payWithLoyalty = opts.payWithLoyalty === true
+      const depositOnly    = opts.depositOnly === true
       if (payWithLoyalty && loyaltyOff)
         throw new Error('Esta semana no tiene programa de lealtad')
+      if (payWithLoyalty && depositOnly)
+        throw new Error('El pago con lealtad no admite depósito parcial')
       const datumRentPrice = payWithLoyalty ? 0n : cfg.rentPrice
-      const mintsNft       = !loyaltyOff && !payWithLoyalty
+      const mintsNft       = !loyaltyOff && !payWithLoyalty && !depositOnly
+      const deposit        = cfg.rentPrice * 5000n / 10000n  // 50% (C)
 
       // New node's next = predecessor's old next
       const slotNextConstr = nodeKeyConstr(predNext)
@@ -155,9 +166,9 @@ export function useReserveSlot() {
         headDatum.ownerNFTName,
         headDatum.ownerPkh,
         headDatum.companyPkh,
-        new Constr(2, []),                          // status = Confirmed
+        depositOnly ? new Constr(1, []) : new Constr(2, []),  // status = Pending (C) | Confirmed
         new Constr(0, [customerPkh]),               // customerPkh = Some(customerPkh)
-        mintsNft ? new Constr(0, [rentNFTName]) : new Constr(1, []),  // rentNFTName (R/U: None)
+        mintsNft ? new Constr(0, [rentNFTName]) : new Constr(1, []),  // rentNFTName (C/R/U: None)
         new Constr(1, []),                          // disputeDeposit = None
         headDatum.fieldName,
         headDatum.fieldAddress,
@@ -220,6 +231,13 @@ export function useReserveSlot() {
             { kind: 'inline', value: newNodeDatum },
             { lovelace: 2_000_000n },
           )
+      } else if (depositOnly) {
+        // C/N: reserva Pending con depósito del 50% — sin mint
+        txBuilder = txBuilder.pay.ToContract(
+          RENT_VALIDATOR_ADDR,
+          { kind: 'inline', value: newNodeDatum },
+          { lovelace: deposit },
+        )
       } else {
         // R: lealtad apagada — pago completo sin mint
         txBuilder = txBuilder.pay.ToContract(
@@ -234,9 +252,14 @@ export function useReserveSlot() {
         txBuilder = txBuilder.readFrom([headUtxo])
       }
 
+      console.log('[reserve] 2/5 construyendo tx (coin selection + evaluación)…')
       const tx     = await txBuilder.complete()
+      console.log('[reserve] 3/5 tx lista — pidiendo firma a la wallet…')
       const signed = await tx.sign.withWallet().complete()
-      return await signed.submit()
+      console.log('[reserve] 4/5 firmada — enviando…')
+      const hash = await signed.submit()
+      console.log('[reserve] 5/5 enviada:', hash)
+      return hash
     } catch (e: unknown) {
       const msg = unwrapSubmitError(e)
       setError(msg)

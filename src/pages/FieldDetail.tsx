@@ -23,6 +23,7 @@ import { useRentSlots } from '../hooks/useRentSlots';
 import type { RentSlotUtxo, ListHeadUtxo } from '../hooks/useRentSlots';
 import { useOwnerRecord } from '../hooks/useOwnerRecord';
 import { useCancelSlot } from '../hooks/useCancelSlot';
+import { useConfirmRent } from '../hooks/useConfirmRent';
 
 import { WeekCalendar, CalendarLegend } from '../components/WeekCalendar';
 import type { RentSlotUtxoLike } from '../components/WeekCalendar';
@@ -92,6 +93,7 @@ export default function FieldDetail() {
   const [walletModalOpen, setWalletModalOpen] = React.useState(false);
   const { reserve, loading: reserving, error: reserveError } = useReserveSlot();
   const { cancel: cancelSlot } = useCancelSlot();
+  const { confirmRent } = useConfirmRent();
   const [reserveTxHash, setReserveTxHash] = React.useState<string | null>(null);
   const [cancelTxHash, setCancelTxHash] = React.useState<string | null>(null);
 
@@ -327,9 +329,9 @@ export default function FieldDetail() {
         timeZone={record?.timezone}
         onClose={() => setSelected(null)}
         onConnectWallet={() => setWalletModalOpen(true)}
-        onReserve={async (s) => {
+        onReserve={async (s, opts) => {
           if (!head) throw new Error('Semana no inicializada');
-          const txHash = await reserve(head, s.datum.slotId);
+          const txHash = await reserve(head, s.datum.slotId, opts);
           setSelected(null);
           setReserveTxHash(txHash);
           setTimeout(() => reload(), 3_000);
@@ -340,6 +342,17 @@ export default function FieldDetail() {
           const txHash = await cancelSlot(fullSlot);
           setSelected(null);
           setCancelTxHash(txHash);
+          setTimeout(() => reload(), 3_000);
+        }}
+        onConfirm={async () => {
+          const fullSlot = slots.find(s =>
+            s.datum.slotId === selected?.datum.slotId &&
+            s.datum.weekEnd === selected?.datum.weekEnd
+          );
+          if (!fullSlot) return;
+          const txHash = await confirmRent(fullSlot);
+          setSelected(null);
+          setReserveTxHash(txHash);
           setTimeout(() => reload(), 3_000);
         }}
       />
