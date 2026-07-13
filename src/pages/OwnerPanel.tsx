@@ -3,6 +3,7 @@ import { useLucid } from '../lib/LucidContext'
 import { useOwnerFields } from '../hooks/useOwnerFields'
 import { useRentSlots } from '../hooks/useRentSlots'
 import { useCollectSlot } from '../hooks/useCollectSlot'
+import { useCollectWeek } from '../hooks/useCollectWeek'
 import { useForceClosePending } from '../hooks/useForceClosePending'
 import { useDeinitWeek } from '../hooks/useDeinitWeek'
 import { useUpdateOwnerInfo } from '../hooks/useUpdateOwnerInfo'
@@ -168,20 +169,16 @@ interface WeekView {
 function WeekCard({
   week,
   now,
-  onCollect,
-  collecting,
-  onForceClose,
-  forceClosing,
+  onCollectWeek,
+  collectingWeek,
   onDeinit,
   deiniting,
   timeZone,
 }: {
   week: WeekView
   now: number
-  onCollect: (slot: RentSlotUtxo) => void
-  collecting: boolean
-  onForceClose: (slot: RentSlotUtxo) => void
-  forceClosing: boolean
+  onCollectWeek: (head: ListHeadUtxo) => void
+  collectingWeek: boolean
   onDeinit: (head: ListHeadUtxo) => void
   deiniting: boolean
   /** Field's IANA timezone (OwnerRecord.timezone) — defaults to UTC if unknown. */
@@ -192,6 +189,21 @@ function WeekCard({
   const weekStartDate = new Date(config.weekStartPosix)
   const weekEndDate = new Date(week.weekEnd)
   const completedInWeek = week.slots.filter(s => s.datum.status === 'Completed')
+
+  // Cobrables tras week_end: Completed + Confirmed no-shows + Pendings sin
+  // confirmar. El collect semanal los cobra todos en una tx (los no-shows queman
+  // su Rent NFT; los Pendings entregan al owner su depósito del 50%).
+  const weekOver = now > week.weekEnd
+  const collectableSlots = weekOver
+    ? week.slots.filter(s =>
+        s.datum.status === 'Completed' || s.datum.status === 'Confirmed' || s.datum.status === 'Pending')
+    : []
+  const collectableTotal = collectableSlots.reduce(
+    (sum, s) => sum + (s.datum.status === 'Pending' ? s.datum.rentPrice / 2n : s.datum.rentPrice),
+    0n,
+  )
+  const noShowCount = collectableSlots.filter(s => s.datum.status === 'Confirmed').length
+  const pendingCount = collectableSlots.filter(s => s.datum.status === 'Pending').length
 
   // weekStartPosix/weekEnd are UTC on-chain — format in the field's own
   // timezone, matching the schedule's local hours (see lib/timezone.ts).
@@ -229,35 +241,31 @@ function WeekCard({
 
       {open && (
         <div className="px-3 py-2 flex flex-col gap-1.5 border-t border-[var(--line-strong)]">
+          {collectableSlots.length > 0 && (
+            <div className="my-1 p-3 rounded-[10px] bg-[var(--mint-bg)] border border-[#b9d8c1] flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-[13px] text-[#244d33]">
+                <span className="font-semibold">Semana terminada</span> — {collectableSlots.length} slot{collectableSlots.length > 1 ? 's' : ''} por
+                cobrar ({formatAda(collectableTotal)})
+                {noShowCount > 0 && <span className="text-[12px]"> · incluye {noShowCount} no-show{noShowCount > 1 ? 's' : ''}</span>}
+                {pendingCount > 0 && <span className="text-[12px]"> · {pendingCount} sin confirmar (depósito 50%)</span>}
+              </div>
+              <button
+                type="button"
+                disabled={collectingWeek}
+                onClick={() => onCollectWeek(week.head)}
+                className="px-4 py-2 rounded-[10px] bg-[var(--accent)] hover:bg-[var(--accent-deep)] text-white font-semibold text-[13px] disabled:opacity-50"
+              >
+                {collectingWeek ? 'Cobrando…' : `Cobrar alquileres de la semana (${formatAda(collectableTotal)})`}
+              </button>
+            </div>
+          )}
           {week.slots.length === 0 && (
             <p className="text-[var(--muted)] text-sm py-2 px-1">
               No se encontraron slots para esta semana en el contrato.
             </p>
           )}
           {week.slots.map(s => (
-            <div key={s.txHash + '#' + s.outputIndex}>
-              <RentSlotRow datum={s.datum} timeZone={tz} />
-              {s.datum.status === 'Completed' && (
-                <button
-                  type="button"
-                  disabled={collecting}
-                  onClick={() => onCollect(s)}
-                  className="mt-1 px-3 py-1.5 rounded-[8px] text-xs font-semibold border border-[var(--mint-ink)] text-[var(--mint-ink)] bg-[var(--mint-bg)] hover:opacity-80 disabled:opacity-40"
-                >
-                  {collecting ? 'Cobrando…' : 'Cobrar slot'}
-                </button>
-              )}
-              {s.datum.status === 'Pending' && now > s.datum.cancelDeadline && (
-                <button
-                  type="button"
-                  disabled={forceClosing}
-                  onClick={() => onForceClose(s)}
-                  className="mt-1 px-3 py-1.5 rounded-[8px] text-xs font-semibold border border-[var(--rose-ink)] text-[var(--rose-ink)] bg-[var(--rose-bg)] hover:opacity-80 disabled:opacity-40"
-                >
-                  {forceClosing ? 'Cerrando…' : 'Forzar cierre (cliente no confirmó)'}
-                </button>
-              )}
-            </div>
+            <RentSlotRow key={s.txHash + '#' + s.outputIndex} datum={s.datum} timeZone={tz} />
           ))}
           {week.head.datum.next.tag === 'Empty' && (
             <div className="mt-1 pt-2 border-t border-[var(--line)]">
@@ -298,6 +306,8 @@ export default function OwnerPanel() {
 
   const { collectSlot, loading: collecting, error: collectError } = useCollectSlot()
   const [collectTxHash, setCollectTxHash] = React.useState<string | null>(null)
+
+  const { collectWeek, loading: collectingWeek, error: collectWeekError } = useCollectWeek()
 
   const { forceClosePending, loading: forceClosing, error: forceCloseError } = useForceClosePending()
   const [forceCloseTxHash, setForceCloseTxHash] = React.useState<string | null>(null)
@@ -351,7 +361,6 @@ export default function OwnerPanel() {
   )
 
   const record = selectedField.record
-  const completedSlots = slots.filter(s => s.datum.status === 'Completed' && s.datum.fieldName === record.fieldName)
 
   const fieldHeads = heads.filter(h => h.datum.ownerNFTName === selectedField.ownerNFTName)
 
@@ -367,6 +376,8 @@ export default function OwnerPanel() {
     !fieldHeads.some(h => h.datum.config.weekStartPosix + WEEK_MS === s.datum.weekEnd)
   )
 
+  // Cobro por slot: solo queda como fallback para slots huérfanos (sin head —
+  // el cobro semanal necesita la linked list de la semana).
   const handleCollect = async (slot: RentSlotUtxo) => {
     try {
       const txHash = await collectSlot(slot)
@@ -375,12 +386,12 @@ export default function OwnerPanel() {
     } catch { /* error shown in collectError */ }
   }
 
-  // Cobrar el primer slot completado disponible (un clic = un slot).
-  // Cada tx actualiza el Owner NFT UTxO, así que Blockfrost necesita ~20-40s
-  // antes de que el siguiente clic funcione.
-  const handleCollectNext = () => {
-    const next = completedSlots[0]
-    if (next) handleCollect(next)
+  const handleCollectWeek = async (head: ListHeadUtxo) => {
+    try {
+      const txHash = await collectWeek(head)
+      setCollectTxHash(txHash)
+      setTimeout(() => reload(), 3_000)
+    } catch { /* error shown in collectWeekError */ }
   }
 
   const handleForceClose = async (slot: RentSlotUtxo) => {
@@ -459,9 +470,6 @@ export default function OwnerPanel() {
         record={record}
         viewerPkh={ownerPkh ?? undefined}
         onUpdateInfo={() => setEditInfoOpen(v => !v)}
-        onCollectPayments={handleCollectNext}
-        completedCount={completedSlots.length}
-        collecting={collecting}
       />
 
       {editInfoOpen && (
@@ -487,6 +495,11 @@ export default function OwnerPanel() {
       {collectError && (
         <div className="px-4 py-3 rounded-[10px] bg-[var(--rose-bg)] border border-[#ecb5ac] text-[var(--rose-ink)] text-sm">
           Error al cobrar: {collectError}
+        </div>
+      )}
+      {collectWeekError && (
+        <div className="px-4 py-3 rounded-[10px] bg-[var(--rose-bg)] border border-[#ecb5ac] text-[var(--rose-ink)] text-sm">
+          Error al cobrar la semana: {collectWeekError}
         </div>
       )}
       {collectTxHash && (
@@ -544,10 +557,8 @@ export default function OwnerPanel() {
               key={w.head.txHash + '#' + w.head.outputIndex}
               week={w}
               now={now}
-              onCollect={handleCollect}
-              collecting={collecting}
-              onForceClose={handleForceClose}
-              forceClosing={forceClosing}
+              onCollectWeek={handleCollectWeek}
+              collectingWeek={collectingWeek}
               onDeinit={handleDeinit}
               deiniting={deiniting}
               timeZone={record.timezone}
